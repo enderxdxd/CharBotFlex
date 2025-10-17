@@ -4,14 +4,44 @@ import { getFirestore } from 'firebase-admin/firestore';
 
 // Inicializar Firebase Admin
 if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-    }),
-    projectId: process.env.FIREBASE_PROJECT_ID,
-  });
+  try {
+    // Verificar se as credenciais do Firebase estão configuradas
+    const projectId = process.env.FIREBASE_PROJECT_ID;
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+
+    if (!projectId || !clientEmail || !privateKey || 
+        projectId === 'your-project-id' || 
+        clientEmail.includes('your-service-account')) {
+      console.warn('⚠️  Firebase não configurado! Usando modo de desenvolvimento.');
+      console.warn('⚠️  Configure as credenciais do Firebase no arquivo backend/.env');
+      console.warn('⚠️  Algumas funcionalidades podem não funcionar corretamente.');
+      
+      // Inicializar em modo de desenvolvimento (sem autenticação real)
+      admin.initializeApp({
+        projectId: 'charbotflex-dev',
+      });
+    } else {
+      // Inicializar com credenciais reais
+      admin.initializeApp({
+        credential: admin.credential.cert({
+          projectId,
+          clientEmail,
+          privateKey: privateKey.replace(/\\n/g, '\n'),
+        }),
+        projectId,
+      });
+      console.log('✅ Firebase Admin inicializado com sucesso!');
+    }
+  } catch (error) {
+    console.error('❌ Erro ao inicializar Firebase:', error);
+    console.warn('⚠️  Continuando em modo de desenvolvimento...');
+    
+    // Fallback: inicializar sem credenciais
+    admin.initializeApp({
+      projectId: 'charbotflex-dev',
+    });
+  }
 }
 
 export const auth = getAuth();

@@ -59,14 +59,15 @@ export const getBotFlowById = async (req: AuthRequest, res: Response) => {
 
 export const createBotFlow = async (req: AuthRequest, res: Response) => {
   try {
-    const { name, trigger, nodes } = req.body;
+    const { name, trigger, nodes, edges, isActive } = req.body;
 
     const flowId = generateId();
     const flow = {
       name,
-      isActive: false,
+      isActive: isActive || false,
       trigger,
-      nodes,
+      nodes: nodes || [],
+      edges: edges || [],
       createdAt: new Date(),
       updatedAt: new Date(),
     };

@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import MainLayout from '@/components/layout/MainLayout';
 import { useAuthStore } from '@/store/authStore';
 import { useChatStore } from '@/store/chatStore';
 import { useSocket } from '@/hooks/useSocket';
@@ -129,8 +131,11 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Cabeçalho */}
+    <ProtectedRoute>
+      <MainLayout>
+        <div className="min-h-screen bg-gray-50 p-8">
+          <div className="max-w-7xl mx-auto space-y-6">
+            {/* Cabeçalho */}
       <div>
         <h1 className="text-3xl font-bold text-gray-900">
           Bem-vindo, {user?.displayName || user?.email || 'Operador'}!
@@ -319,6 +324,9 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
-    </div>
+          </div>
+        </div>
+      </MainLayout>
+    </ProtectedRoute>
   );
 }

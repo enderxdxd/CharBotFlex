@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { usePermissions } from '@/hooks/usePermissions';
 import api from '@/lib/api';
@@ -21,6 +22,7 @@ interface BotFlow {
 }
 
 export default function BotFlowsPage() {
+  const router = useRouter();
   const { isAdmin, loading: permissionsLoading } = usePermissions();
   const [flows, setFlows] = useState<BotFlow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,11 +36,16 @@ export default function BotFlowsPage() {
       setLoading(true);
       const response = await api.get('/bot/flows');
       if (response.data.success) {
-        setFlows(response.data.data);
+        setFlows(response.data.data || []);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao buscar fluxos:', error);
-      toast.error('Erro ao carregar fluxos do bot');
+      // Se for 404 ou erro de rota, apenas mostra lista vazia
+      if (error?.response?.status === 404 || error?.code === 'ERR_NETWORK') {
+        setFlows([]);
+      } else {
+        toast.error('Erro ao carregar fluxos do bot');
+      }
     } finally {
       setLoading(false);
     }
@@ -109,7 +116,7 @@ export default function BotFlowsPage() {
               </div>
               
               <button
-                onClick={() => toast.info('Funcionalidade em desenvolvimento')}
+                onClick={() => router.push('/bot-flows/new')}
                 className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
               >
                 <Plus className="h-4 w-4 mr-2" />
@@ -125,7 +132,7 @@ export default function BotFlowsPage() {
               <h3 className="text-lg font-medium text-gray-900 mb-2">Nenhum fluxo criado</h3>
               <p className="text-gray-500 mb-6">Comece criando seu primeiro fluxo conversacional</p>
               <button
-                onClick={() => toast.info('Funcionalidade em desenvolvimento')}
+                onClick={() => router.push('/bot-flows/new')}
                 className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
               >
                 <Plus className="h-4 w-4 mr-2" />
@@ -190,7 +197,7 @@ export default function BotFlowsPage() {
                       </button>
                       
                       <button
-                        onClick={() => toast.info('Funcionalidade em desenvolvimento')}
+                        onClick={() => router.push(`/bot-flows/${flow.id}`)}
                         className="p-2 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-md"
                       >
                         <Edit className="h-4 w-4" />
