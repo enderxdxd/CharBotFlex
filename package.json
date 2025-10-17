@@ -1,0 +1,51 @@
+{
+  "name": "charbotflex-monorepo",
+  "version": "1.0.0",
+  "description": "Sistema completo de atendimento WhatsApp com bot inteligente",
+  "private": true,
+  "scripts": {
+    "install:backend": "cd backend && npm install",
+    "install:frontend": "cd chatbotflex && npm install",
+    "install:all": "npm run install:backend && npm run install:frontend",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd chatbotflex && npm run dev",
+    "dev:all": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "build:backend": "cd backend && npm run build",
+    "build:frontend": "cd chatbotflex && npm run build",
+    "build:all": "npm run build:backend && npm run build:frontend",
+    "start:backend": "cd backend && npm start",
+    "start:frontend": "cd chatbotflex && npm start",
+    "start:all": "concurrently \"npm run start:backend\" \"npm run start:frontend\"",
+    "clean:backend": "cd backend && rm -rf node_modules dist",
+    "clean:frontend": "cd chatbotflex && rm -rf node_modules .next",
+    "clean:all": "npm run clean:backend && npm run clean:frontend",
+    "setup": "npm run install:all && echo 'Setup completo! Configure os arquivos .env antes de executar.'",
+    "health": "curl -f http://localhost:3001/health && curl -f http://localhost:3000"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "workspaces": [
+    "backend",
+    "chatbotflex"
+  ],
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/seu-usuario/CharBotFlex.git"
+  },
+  "keywords": [
+    "whatsapp",
+    "chatbot",
+    "customer-service",
+    "nodejs",
+    "nextjs",
+    "firebase",
+    "baileys"
+  ],
+  "author": "Seu Nome",
+  "license": "MIT"
+}

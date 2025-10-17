@@ -1,0 +1,244 @@
+import makeWASocket, {
+  DisconnectReason,
+  useMultiFileAuthState,
+  WASocket,
+  proto,
+  downloadMediaMessage,
+  fetchLatestBaileysVersion,
+} from '@whiskeysockets/baileys';
+import { Boom } from '@hapi/boom';
+import QRCode from 'qrcode';
+import path from 'path';
+import logger from '../../utils/logger';
+import { EventEmitter } from 'events';
+
+export class BaileysService extends EventEmitter {
+  private sock: WASocket | null = null;
+  private qrCode: string | null = null;
+  private isConnected: boolean = false;
+  private sessionPath: string;
+
+  constructor() {
+    super();
+    this.sessionPath = process.env.BAILEYS_SESSION_PATH || './baileys_sessions';
+  }
+
+  async initialize() {
+    try {
+      const { state, saveCreds } = await useMultiFileAuthState(
+        path.join(this.sessionPath, 'session')
+      );
+
+      const { version } = await fetchLatestBaileysVersion();
+
+      this.sock = makeWASocket({
+        auth: state,
+        printQRInTerminal: true,
+        version,
+        defaultQueryTimeoutMs: undefined,
+      });
+
+      // Event: Atualização de conexão
+      this.sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+
+        if (qr) {
+          this.qrCode = await QRCode.toDataURL(qr);
+          logger.info('📱 QR Code gerado');
+          this.emit('qr', this.qrCode);
+        }
+
+        if (connection === 'close') {
+          const shouldReconnect =
+            (lastDisconnect?.error as Boom)?.output?.statusCode !==
+            DisconnectReason.loggedOut;
+
+          logger.info('Conexão fechada. Reconectar:', shouldReconnect);
+
+          if (shouldReconnect) {
+            await this.initialize();
+          } else {
+            this.isConnected = false;
+            this.emit('disconnected');
+          }
+        } else if (connection === 'open') {
+          this.isConnected = true;
+          this.qrCode = null;
+          logger.info('✅ Baileys conectado com sucesso!');
+          this.emit('connected');
+        }
+      });
+
+      // Event: Atualização de credenciais
+      this.sock.ev.on('creds.update', saveCreds);
+
+      // Event: Mensagens recebidas
+      this.sock.ev.on('messages.upsert', async ({ messages, type }) => {
+        if (type !== 'notify') return;
+
+        for (const message of messages) {
+          if (!message.message) continue;
+
+          const messageData = this.extractMessageData(message);
+          
+          logger.info('📨 Nova mensagem Baileys:', messageData);
+          
+          this.emit('message', messageData);
+        }
+      });
+
+      // Event: Status de mensagem atualizado
+      this.sock.ev.on('messages.update', (updates) => {
+        for (const update of updates) {
+          this.emit('messageUpdate', update);
+        }
+      });
+    } catch (error) {
+      logger.error('Erro ao inicializar Baileys:', error);
+      throw error;
+    }
+  }
+
+  private extractMessageData(message: proto.IWebMessageInfo) {
+    const remoteJid = message.key.remoteJid || '';
+    const messageType = Object.keys(message.message || {})[0];
+    
+    let content = '';
+    let mediaUrl = undefined;
+
+    // Extrair conteúdo baseado no tipo
+    if (message.message?.conversation) {
+      content = message.message.conversation;
+    } else if (message.message?.extendedTextMessage?.text) {
+      content = message.message.extendedTextMessage.text;
+    } else if (message.message?.imageMessage?.caption) {
+      content = message.message.imageMessage.caption;
+    }
+
+    return {
+      id: message.key.id,
+      from: remoteJid,
+      fromMe: message.key.fromMe || false,
+      type: this.mapMessageType(messageType),
+      content,
+      mediaUrl,
+      timestamp: message.messageTimestamp
+        ? new Date(Number(message.messageTimestamp) * 1000)
+        : new Date(),
+      raw: message,
+    };
+  }
+
+  private mapMessageType(type: string): string {
+    const typeMap: Record<string, string> = {
+      conversation: 'text',
+      extendedTextMessage: 'text',
+      imageMessage: 'image',
+      videoMessage: 'video',
+      audioMessage: 'audio',
+      documentMessage: 'document',
+    };
+
+    return typeMap[type] || 'text';
+  }
+
+  async sendTextMessage(phoneNumber: string, text: string) {
+    if (!this.sock) {
+      throw new Error('Baileys não está conectado');
+    }
+
+    try {
+      const jid = this.formatPhoneNumber(phoneNumber);
+      
+      await this.sock.sendMessage(jid, { text });
+      
+      logger.info(`✅ Mensagem enviada para ${phoneNumber}`);
+    } catch (error) {
+      logger.error('Erro ao enviar mensagem:', error);
+      throw error;
+    }
+  }
+
+  async sendMediaMessage(
+    phoneNumber: string,
+    mediaUrl: string,
+    caption?: string,
+    type: 'image' | 'video' | 'audio' | 'document' = 'image'
+  ) {
+    if (!this.sock) {
+      throw new Error('Baileys não está conectado');
+    }
+
+    try {
+      const jid = this.formatPhoneNumber(phoneNumber);
+      
+      const message: any = {
+        [type]: { url: mediaUrl },
+      };
+
+      if (caption) {
+        message[type].caption = caption;
+      }
+
+      await this.sock.sendMessage(jid, message);
+      
+      logger.info(`✅ Mídia ${type} enviada para ${phoneNumber}`);
+    } catch (error) {
+      logger.error('Erro ao enviar mídia:', error);
+      throw error;
+    }
+  }
+
+  async downloadMedia(message: proto.IWebMessageInfo) {
+    if (!this.sock) {
+      throw new Error('Baileys não está conectado');
+    }
+
+    try {
+      const buffer = await downloadMediaMessage(
+        message,
+        'buffer',
+        {},
+        {
+          logger: logger as any,
+          reuploadRequest: this.sock.updateMediaMessage,
+        }
+      );
+
+      return buffer;
+    } catch (error) {
+      logger.error('Erro ao baixar mídia:', error);
+      throw error;
+    }
+  }
+
+  private formatPhoneNumber(phone: string): string {
+    // Remove caracteres não numéricos
+    let cleaned = phone.replace(/\D/g, '');
+    
+    // Adiciona código do país se não tiver (Brasil = 55)
+    if (!cleaned.startsWith('55')) {
+      cleaned = '55' + cleaned;
+    }
+    
+    // Adiciona @s.whatsapp.net
+    return `${cleaned}@s.whatsapp.net`;
+  }
+
+  getQRCode(): string | null {
+    return this.qrCode;
+  }
+
+  isReady(): boolean {
+    return this.isConnected;
+  }
+
+  async disconnect() {
+    if (this.sock) {
+      await this.sock.logout();
+      this.sock = null;
+      this.isConnected = false;
+      logger.info('Baileys desconectado');
+    }
+  }
+}
