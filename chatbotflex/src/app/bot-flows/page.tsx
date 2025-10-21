@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import MainLayout from '@/components/layout/MainLayout';
 import { usePermissions } from '@/hooks/usePermissions';
 import api from '@/lib/api';
 import { Bot, Plus, Edit, Trash2, Power, PowerOff, Loader2, Shield } from 'lucide-react';
@@ -105,7 +106,7 @@ export default function BotFlowsPage() {
 
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-gray-50">
+      <MainLayout>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Header */}
           <div className="mb-8">
@@ -216,7 +217,7 @@ export default function BotFlowsPage() {
             </div>
           )}
         </div>
-      </div>
+      </MainLayout>
     </ProtectedRoute>
   );
 }

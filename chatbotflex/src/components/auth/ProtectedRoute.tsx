@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
+import { db } from '@/lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
 import { Loader2 } from 'lucide-react';
 
 interface ProtectedRouteProps {
@@ -12,14 +14,39 @@ interface ProtectedRouteProps {
 export default function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  const [checkingPasswordReset, setCheckingPasswordReset] = useState(true);
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.push('/auth/login');
-    }
-  }, [user, loading, router]);
+    const checkAuth = async () => {
+      if (!loading && !user) {
+        router.push('/auth/login');
+        return;
+      }
 
-  if (loading) {
+      if (user && pathname !== '/auth/reset-password') {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            if (userData.requirePasswordReset === true) {
+              router.push('/auth/reset-password');
+              return;
+            }
+          }
+        } catch (error) {
+          console.error('Erro ao verificar status de reset:', error);
+        }
+      }
+      
+      setCheckingPasswordReset(false);
+    };
+
+    checkAuth();
+  }, [user, loading, router, pathname]);
+
+  if (loading || checkingPasswordReset) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">

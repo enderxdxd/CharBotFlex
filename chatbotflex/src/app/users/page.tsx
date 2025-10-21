@@ -1,24 +1,67 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { usePermissions } from '@/hooks/usePermissions';
-import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { toast } from 'sonner';
-import { Plus, Users, Shield, UserCheck, Loader2 } from 'lucide-react';
+import { Plus, Users, Shield, UserCheck, Loader2, Mail, Phone, Crown, User } from 'lucide-react';
+
+interface UserData {
+  uid: string;
+  name: string;
+  email: string;
+  role: 'admin' | 'operator' | 'supervisor';
+  phone?: string;
+  status: string;
+  createdAt: any;
+}
 
 export default function UsersPage() {
   const { canCreateUsers, isAdmin, loading: permissionsLoading } = usePermissions();
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [users, setUsers] = useState<UserData[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(true);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     password: '',
     role: 'operator' as 'admin' | 'operator'
   });
+
+  // Carregar usuários do Firestore
+  const loadUsers = async () => {
+    try {
+      setLoadingUsers(true);
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, orderBy('createdAt', 'desc'));
+      const querySnapshot = await getDocs(q);
+      
+      const usersData: UserData[] = [];
+      querySnapshot.forEach((doc) => {
+        usersData.push({
+          uid: doc.id,
+          ...doc.data()
+        } as UserData);
+      });
+      
+      setUsers(usersData);
+    } catch (error) {
+      console.error('Erro ao carregar usuários:', error);
+      toast.error('Erro ao carregar lista de usuários');
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  // Carregar usuários ao montar o componente
+  useEffect(() => {
+    if (!permissionsLoading && canCreateUsers) {
+      loadUsers();
+    }
+  }, [permissionsLoading, canCreateUsers]);
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,26 +84,41 @@ export default function UsersPage() {
     setIsCreating(true);
 
     try {
-      // Criar usuário no Firebase Auth
-      const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+      // Obter token do usuário atual
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        toast.error('Você precisa estar autenticado');
+        return;
+      }
+
+      const token = await currentUser.getIdToken();
+
+      // Criar usuário via API do backend (não faz login automático)
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/users`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: formData.name,
+          email: formData.email,
+          password: formData.password,
+          role: formData.role,
+          phone: '', // Campo obrigatório no backend
+          maxChats: 5
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Erro ao criar usuário');
+      }
+
+      toast.success(`Usuário ${formData.name} criado com sucesso! Uma senha temporária foi definida.`);
       
-      // Atualizar perfil
-      await updateProfile(userCredential.user, {
-        displayName: formData.name
-      });
-
-      // Salvar dados do usuário no Firestore
-      await setDoc(doc(db, 'users', userCredential.user.uid), {
-        name: formData.name,
-        email: formData.email,
-        role: formData.role,
-        isOnline: false,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        createdBy: auth.currentUser?.uid
-      });
-
-      toast.success(`Usuário ${formData.name} criado com sucesso!`);
+      // Recarregar lista de usuários
+      await loadUsers();
       
       // Limpar formulário
       setFormData({
@@ -75,18 +133,14 @@ export default function UsersPage() {
       console.error('Erro ao criar usuário:', error);
       
       let errorMessage = 'Erro ao criar usuário';
-      switch (error.code) {
-        case 'auth/email-already-in-use':
-          errorMessage = 'Este email já está em uso';
-          break;
-        case 'auth/invalid-email':
-          errorMessage = 'Email inválido';
-          break;
-        case 'auth/weak-password':
-          errorMessage = 'A senha é muito fraca';
-          break;
-        default:
-          errorMessage = 'Erro ao criar usuário. Tente novamente';
+      if (error.message.includes('email-already-in-use') || error.message.includes('já está em uso')) {
+        errorMessage = 'Este email já está em uso';
+      } else if (error.message.includes('invalid-email')) {
+        errorMessage = 'Email inválido';
+      } else if (error.message.includes('weak-password')) {
+        errorMessage = 'A senha é muito fraca';
+      } else if (error.message) {
+        errorMessage = error.message;
       }
       
       toast.error(errorMessage);
@@ -244,13 +298,101 @@ export default function UsersPage() {
             </div>
             
             <div className="p-6">
-              <div className="text-center py-12">
-                <Users className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                <p className="text-gray-500">Lista de usuários será implementada aqui</p>
-                <p className="text-sm text-gray-400 mt-2">
-                  Funcionalidade de listagem em desenvolvimento
-                </p>
-              </div>
+              {loadingUsers ? (
+                <div className="text-center py-12">
+                  <Loader2 className="animate-spin h-8 w-8 text-indigo-600 mx-auto mb-4" />
+                  <p className="text-gray-600">Carregando usuários...</p>
+                </div>
+              ) : users.length === 0 ? (
+                <div className="text-center py-12">
+                  <Users className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+                  <p className="text-gray-500">Nenhum usuário encontrado</p>
+                  <p className="text-sm text-gray-400 mt-2">
+                    Crie o primeiro usuário clicando no botão acima
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Usuário
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Email
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Função
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Status
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Telefone
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {users.map((user) => (
+                        <tr key={user.uid} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center">
+                              <div className="flex-shrink-0 h-10 w-10 bg-indigo-100 rounded-full flex items-center justify-center">
+                                <User className="h-5 w-5 text-indigo-600" />
+                              </div>
+                              <div className="ml-4">
+                                <div className="text-sm font-medium text-gray-900">
+                                  {user.name}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center text-sm text-gray-500">
+                              <Mail className="h-4 w-4 mr-2 text-gray-400" />
+                              {user.email}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              user.role === 'admin' 
+                                ? 'bg-purple-100 text-purple-800' 
+                                : user.role === 'supervisor'
+                                ? 'bg-blue-100 text-blue-800'
+                                : 'bg-green-100 text-green-800'
+                            }`}>
+                              {user.role === 'admin' && <Crown className="h-3 w-3 mr-1" />}
+                              {user.role === 'admin' ? 'Administrador' : user.role === 'supervisor' ? 'Supervisor' : 'Operador'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              user.status === 'online' 
+                                ? 'bg-green-100 text-green-800' 
+                                : user.status === 'busy'
+                                ? 'bg-yellow-100 text-yellow-800'
+                                : 'bg-gray-100 text-gray-800'
+                            }`}>
+                              {user.status === 'online' ? 'Online' : user.status === 'busy' ? 'Ocupado' : 'Offline'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {user.phone ? (
+                              <div className="flex items-center">
+                                <Phone className="h-4 w-4 mr-2 text-gray-400" />
+                                {user.phone}
+                              </div>
+                            ) : (
+                              <span className="text-gray-400">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         </div>

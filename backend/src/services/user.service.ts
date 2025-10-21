@@ -99,6 +99,7 @@ export class UserService {
           canManageUsers: userData.role === 'admin',
           canManageBotFlow: userData.role === 'admin',
         },
+        requirePasswordReset: true, // Forçar reset de senha no primeiro login
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -192,6 +193,26 @@ export class UserService {
       }
     } catch (error) {
       logger.error('Erro ao decrementar chats:', error);
+      throw error;
+    }
+  }
+
+  async updatePassword(uid: string, newPassword: string): Promise<void> {
+    try {
+      // Atualizar senha no Firebase Auth
+      await auth.updateUser(uid, {
+        password: newPassword,
+      });
+
+      // Remover flag de reset de senha no Firestore
+      await db.collection(collections.users).doc(uid).update({
+        requirePasswordReset: false,
+        updatedAt: new Date(),
+      });
+
+      logger.info(`Senha do usuário ${uid} atualizada`);
+    } catch (error) {
+      logger.error('Erro ao atualizar senha:', error);
       throw error;
     }
   }

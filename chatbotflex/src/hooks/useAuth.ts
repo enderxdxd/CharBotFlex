@@ -16,12 +16,36 @@ export function useAuth() {
   const router = useRouter();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        // Forçar refresh do token para garantir que está válido
+        try {
+          await user.getIdToken(true);
+        } catch (error) {
+          console.error('Erro ao renovar token:', error);
+        }
+      }
       setUser(user);
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    // Renovar token a cada 50 minutos (tokens expiram em 1 hora)
+    const tokenRefreshInterval = setInterval(async () => {
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        try {
+          await currentUser.getIdToken(true);
+          console.log('🔄 Token renovado automaticamente');
+        } catch (error) {
+          console.error('Erro ao renovar token:', error);
+        }
+      }
+    }, 50 * 60 * 1000); // 50 minutos
+
+    return () => {
+      unsubscribe();
+      clearInterval(tokenRefreshInterval);
+    };
   }, []);
 
   const signOut = async () => {

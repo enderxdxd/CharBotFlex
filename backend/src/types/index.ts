@@ -14,6 +14,7 @@ export interface IUser {
   maxChats: number;
   currentChats: number;
   permissions: IPermissions;
+  requirePasswordReset?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

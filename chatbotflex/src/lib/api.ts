@@ -36,6 +36,8 @@ api.interceptors.response.use(
     return response;
   },
   async (error) => {
+    const originalRequest = error.config;
+
     if (error.response) {
       // Erro com resposta do servidor
       const { status, data } = error.response;
@@ -43,9 +45,32 @@ api.interceptors.response.use(
       switch (status) {
         case 401:
           // Token inválido ou expirado
-          console.error('Não autorizado - redirecionando para login');
+          console.warn('Token expirado, tentando renovar...');
           
-          // Fazer logout
+          // Tentar renovar token uma vez
+          if (!originalRequest._retry) {
+            originalRequest._retry = true;
+            
+            try {
+              const user = auth.currentUser;
+              if (user) {
+                // Forçar renovação do token
+                const newToken = await user.getIdToken(true);
+                console.log('✅ Token renovado com sucesso');
+                
+                // Atualizar header com novo token
+                originalRequest.headers.Authorization = `Bearer ${newToken}`;
+                
+                // Tentar requisição novamente
+                return api(originalRequest);
+              }
+            } catch (refreshError) {
+              console.error('Erro ao renovar token:', refreshError);
+            }
+          }
+          
+          // Se falhou ao renovar, fazer logout
+          console.error('Não foi possível renovar token - redirecionando para login');
           await auth.signOut();
           
           // Redirecionar para login

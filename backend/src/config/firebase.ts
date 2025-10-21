@@ -1,6 +1,10 @@
 import admin from 'firebase-admin';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
+import dotenv from 'dotenv';
+
+// IMPORTANTE: Carregar variáveis de ambiente ANTES de tudo
+dotenv.config();
 
 // Inicializar Firebase Admin
 if (!admin.apps.length) {
@@ -9,6 +13,12 @@ if (!admin.apps.length) {
     const projectId = process.env.FIREBASE_PROJECT_ID;
     const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
     const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+
+    // Debug
+    console.log('🔍 Firebase Config Debug:');
+    console.log('  - projectId:', projectId);
+    console.log('  - clientEmail:', clientEmail ? '✅ Presente' : '❌ Ausente');
+    console.log('  - privateKey:', privateKey ? '✅ Presente' : '❌ Ausente');
 
     if (!projectId || !clientEmail || !privateKey || 
         projectId === 'your-project-id' || 
@@ -54,4 +64,5 @@ export const collections = {
   messages: 'messages',
   botFlows: 'bot_flows',
   transfers: 'transfers',
+  departments: 'departments',
 };

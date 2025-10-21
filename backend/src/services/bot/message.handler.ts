@@ -19,6 +19,12 @@ export class MessageHandler {
 
   async handleIncomingMessage(message: any, source: 'baileys' | 'official') {
     try {
+      // IMPORTANTE: Ignorar mensagens enviadas pelo próprio bot
+      if (message.fromMe || message.key?.fromMe) {
+        logger.debug('Ignorando mensagem enviada pelo bot');
+        return;
+      }
+
       const phoneNumber = message.from.replace('@s.whatsapp.net', '');
       const content = message.content;
 

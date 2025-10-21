@@ -238,7 +238,46 @@ export class BaileysService extends EventEmitter {
       await this.sock.logout();
       this.sock = null;
       this.isConnected = false;
+      this.qrCode = null;
       logger.info('Baileys desconectado');
     }
+  }
+
+  async forceNewQR() {
+    // Desconectar sessão atual se existir
+    if (this.sock) {
+      try {
+        await this.sock.logout();
+        this.sock = null;
+        this.isConnected = false;
+        this.qrCode = null;
+        logger.info('Sessão anterior desconectada');
+      } catch (error) {
+        logger.error('Erro ao desconectar sessão:', error);
+      }
+    }
+
+    // Limpar sessão salva
+    const fs = require('fs');
+    const sessionDir = path.join(this.sessionPath, 'session');
+    if (fs.existsSync(sessionDir)) {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+      logger.info('Sessão anterior removida');
+    }
+
+    // Reinicializar para gerar novo QR Code
+    await this.initialize();
+    
+    // Aguardar QR Code ser gerado
+    return new Promise<string>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Timeout ao gerar QR Code'));
+      }, 10000); // 10 segundos
+
+      this.once('qr', (qr) => {
+        clearTimeout(timeout);
+        resolve(qr);
+      });
+    });
   }
 }

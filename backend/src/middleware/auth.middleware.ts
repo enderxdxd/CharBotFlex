@@ -53,13 +53,12 @@ export const authenticate = async (
     const token = authHeader.split('Bearer ')[1];
 
     try {
-      // Em modo dev, não valida token - apenas cria usuário dev
-      if (isDevelopment) {
-        logger.warn('⚠️  Modo dev: Bypass de autenticação ativado');
+      // Se Firebase NÃO está configurado, usa modo dev
+      if (isDevelopment && !firebaseConfigured) {
+        logger.warn('⚠️  Modo dev: Bypass de autenticação ativado (Firebase não configurado)');
         
         // Tenta extrair informações do token se possível
         try {
-          // Decodifica token sem validação (apenas parse do JWT)
           const tokenParts = token.split('.');
           if (tokenParts.length === 3) {
             const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString());
@@ -113,24 +112,65 @@ export const authenticate = async (
         return next();
       }
       
-      // Modo produção: validação normal
-      const decodedToken = await auth.verifyIdToken(token);
+      // Firebase configurado: validação real
+      logger.info('🔐 Validando token no Firebase...');
+      
+      // Validar token com checkRevoked: false para não invalidar tokens rapidamente
+      const decodedToken = await auth.verifyIdToken(token, false);
       
       // Buscar dados completos do usuário
       const user = await userService.getUserById(decodedToken.uid);
 
       if (!user) {
-        return res.status(401).json({
-          success: false,
-          error: 'Usuário não encontrado',
-        });
+        // Se usuário não existe no banco, criar automaticamente no Firestore
+        logger.info(`Criando usuário automaticamente: ${decodedToken.email}`);
+        
+        const newUser = {
+          uid: decodedToken.uid,
+          email: decodedToken.email || '',
+          name: decodedToken.name || decodedToken.email || 'Usuário',
+          role: 'admin' as const, // Primeiro usuário é admin
+          phone: decodedToken.phone_number || '',
+          status: 'online' as const,
+          maxChats: 10,
+          currentChats: 0,
+          permissions: {
+            canTransfer: true,
+            canViewReports: true,
+            canManageUsers: true,
+            canManageBotFlow: true,
+          },
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        
+        // Salvar diretamente no Firestore
+        const { db, collections } = require('../config/firebase');
+        await db.collection(collections.users).doc(decodedToken.uid).set(newUser);
+        
+        logger.info(`✅ Usuário criado automaticamente: ${newUser.email}`);
+        req.user = newUser;
+      } else {
+        req.user = user;
       }
-
-      // Adicionar usuário na requisição
-      req.user = user;
       
       next();
-    } catch (verifyError) {
+    } catch (verifyError: any) {
+      // Log detalhado do erro
+      logger.error('Erro ao verificar token:', {
+        code: verifyError.code,
+        message: verifyError.message,
+      });
+      
+      // Se for erro de token expirado, retornar mensagem específica
+      if (verifyError.code === 'auth/id-token-expired') {
+        return res.status(401).json({
+          success: false,
+          error: 'Token expirado. Por favor, faça login novamente.',
+          code: 'TOKEN_EXPIRED',
+        });
+      }
+      
       throw verifyError;
     }
   } catch (error) {

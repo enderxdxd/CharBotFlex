@@ -101,6 +101,25 @@ export class WhatsAppManager {
     this.currentProvider = provider;
     logger.info(`🔄 Provider alterado para: ${provider}`);
   }
+
+  async generateNewQR(): Promise<string> {
+    if (this.currentProvider === 'baileys') {
+      return await this.baileysService.forceNewQR();
+    } else {
+      throw new Error('QR Code só disponível para Baileys');
+    }
+  }
+
+  async disconnect() {
+    if (this.currentProvider === 'baileys') {
+      await this.baileysService.disconnect();
+      logger.info('✅ Baileys desconectado');
+    }
+  }
+
+  getBaileysService() {
+    return this.baileysService;
+  }
 }
 
 // Singleton instance

@@ -180,3 +180,36 @@ export const updateUserStatus = async (req: AuthRequest, res: Response) => {
     });
   }
 };
+
+export const updateOwnPassword = async (req: AuthRequest, res: Response) => {
+  try {
+    const { newPassword } = req.body;
+
+    if (!req.user?.uid) {
+      return res.status(401).json({
+        success: false,
+        error: 'Usuário não autenticado',
+      });
+    }
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        error: 'A senha deve ter pelo menos 6 caracteres',
+      });
+    }
+
+    await userService.updatePassword(req.user.uid, newPassword);
+
+    res.json({
+      success: true,
+      message: 'Senha atualizada com sucesso',
+    });
+  } catch (error) {
+    logger.error('Erro ao atualizar senha:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao atualizar senha',
+    });
+  }
+};
