@@ -65,4 +65,8 @@ export const collections = {
   botFlows: 'bot_flows',
   transfers: 'transfers',
   departments: 'departments',
+  tags: 'tags',
+  quickReplies: 'quick_replies',
+  scheduledMessages: 'scheduled_messages',
+  feedback: 'feedback',
 };
