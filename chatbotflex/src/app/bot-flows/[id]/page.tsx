@@ -89,7 +89,7 @@ function ConditionNode({ data, selected }: any) {
           <div className="font-semibold text-sm text-gray-900">Condição</div>
         </div>
         <div className="text-xs text-gray-600 line-clamp-2">{data.label || 'Clique para configurar'}</div>
-        {data.conditions && (
+        {data.conditions && Array.isArray(data.conditions) && data.conditions.length > 0 && (
           <div className="mt-2 flex gap-1">
             {data.conditions.map((c: string, i: number) => (
               <span key={i} className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded">
@@ -186,7 +186,7 @@ function TriggerNode({ data, selected }: any) {
             <Sparkles className="h-3 w-3" />
             <span>Qualquer texto ativa</span>
           </div>
-        ) : data.keywords && data.keywords.length > 0 && (
+        ) : data.keywords && Array.isArray(data.keywords) && data.keywords.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1">
             {data.keywords.map((k: string, i: number) => (
               <span key={i} className="text-xs bg-white/20 text-white px-2 py-0.5 rounded">
@@ -354,8 +354,36 @@ export default function ImprovedFlowEditor() {
   useEffect(() => {
     if (flowId === 'new') {
       setShowTemplates(true);
+    } else {
+      loadFlow();
     }
   }, [flowId]);
+
+  const loadFlow = async () => {
+    try {
+      const response = await api.get(`/bot/flows/${flowId}`);
+      if (response.data.success) {
+        const flow = response.data.data;
+        setFlowName(flow.name);
+        
+        // Normalizar nós para garantir que arrays existam
+        const normalizedNodes = (flow.nodes || []).map((node: any) => ({
+          ...node,
+          data: {
+            ...node.data,
+            keywords: Array.isArray(node.data?.keywords) ? node.data.keywords : [],
+            conditions: Array.isArray(node.data?.conditions) ? node.data.conditions : []
+          }
+        }));
+        
+        setNodes(normalizedNodes);
+        setEdges(flow.edges || []);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar fluxo:', error);
+      toast.error('Erro ao carregar fluxo');
+    }
+  };
 
   const onConnect = useCallback(
     (params: Connection) => {
@@ -378,6 +406,20 @@ export default function ImprovedFlowEditor() {
   };
 
   const addNode = (type: string) => {
+    const defaultData: any = { 
+      label: '',
+      keywords: [],
+      conditions: []
+    };
+
+    // Adicionar dados específicos por tipo
+    if (type === 'trigger') {
+      defaultData.triggerType = 'keywords';
+      defaultData.keywords = [];
+    } else if (type === 'condition') {
+      defaultData.conditions = [];
+    }
+
     const newNode: Node = {
       id: `${type}-${Date.now()}`,
       type,
@@ -385,7 +427,7 @@ export default function ImprovedFlowEditor() {
         x: Math.random() * 300 + 150, 
         y: Math.random() * 300 + 150 
       },
-      data: { label: '' },
+      data: defaultData,
     };
     setNodes((nds: Node[]) => [...nds, newNode]);
     toast.success('Nó adicionado! Clique nele para editar.');
@@ -435,24 +477,46 @@ export default function ImprovedFlowEditor() {
       // Validações
       if (!flowName.trim()) {
         toast.error('Por favor, dê um nome ao fluxo');
+        setSaving(false);
         return;
       }
 
-      if (nodes.length === 0) {
+      if (!Array.isArray(nodes) || nodes.length === 0) {
         toast.error('Adicione pelo menos um nó ao fluxo');
+        setSaving(false);
         return;
       }
 
       // Encontrar o nó gatilho
       const triggerNode = nodes.find((n: Node) => n.type === 'trigger');
       
+      // Normalizar nós antes de salvar - garantir que todos os dados sejam válidos
+      const normalizedNodes = nodes.map((node: Node) => {
+        const nodeData = node.data || {};
+        return {
+          ...node,
+          data: {
+            ...nodeData,
+            label: nodeData.label || '',
+            keywords: Array.isArray(nodeData.keywords) ? nodeData.keywords : [],
+            conditions: Array.isArray(nodeData.conditions) ? nodeData.conditions : [],
+            // Preservar outros campos que possam existir
+            ...(nodeData.triggerType && { triggerType: nodeData.triggerType }),
+            ...(nodeData.validation && { validation: nodeData.validation }),
+            ...(nodeData.department && { department: nodeData.department }),
+          }
+        };
+      });
+      
       const flowData = {
         name: flowName,
-        nodes: nodes,
+        nodes: normalizedNodes,
         edges: edges,
         trigger: triggerNode ? {
           type: triggerNode.data.triggerType || 'any',
-          value: triggerNode.data.keywords?.join(',') || '*',
+          value: Array.isArray(triggerNode.data.keywords) && triggerNode.data.keywords.length > 0 
+            ? triggerNode.data.keywords.join(',') 
+            : '*',
         } : {
           type: 'any',
           value: '*',
@@ -477,7 +541,18 @@ export default function ImprovedFlowEditor() {
       }
     } catch (error: any) {
       console.error('Erro ao salvar fluxo:', error);
-      toast.error(error?.response?.data?.message || 'Erro ao salvar fluxo');
+      console.error('Detalhes do erro:', {
+        message: error?.message,
+        response: error?.response?.data,
+        nodes: nodes,
+        edges: edges
+      });
+      
+      const errorMessage = error?.response?.data?.error || 
+                          error?.response?.data?.message || 
+                          error?.message ||
+                          'Erro ao salvar fluxo';
+      toast.error(errorMessage);
     } finally {
       setSaving(false);
     }
@@ -777,7 +852,7 @@ export default function ImprovedFlowEditor() {
                           </label>
                           <input
                             type="text"
-                            value={(selectedNode.data.keywords || []).join(', ')}
+                            value={Array.isArray(selectedNode.data.keywords) ? selectedNode.data.keywords.join(', ') : ''}
                             onChange={(e) => updateNodeData('keywords', e.target.value.split(',').map((k: string) => k.trim()).filter((k: string) => k))}
                             className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                             placeholder="oi, olá, começar, menu"
@@ -835,8 +910,8 @@ export default function ImprovedFlowEditor() {
                       </label>
                       <input
                         type="text"
-                        value={(selectedNode.data.conditions || []).join(', ')}
-                        onChange={(e) => updateNodeData('conditions', e.target.value.split(',').map((c: string) => c.trim()))}
+                        value={Array.isArray(selectedNode.data.conditions) ? selectedNode.data.conditions.join(', ') : ''}
+                        onChange={(e) => updateNodeData('conditions', e.target.value.split(',').map((c: string) => c.trim()).filter((c: string) => c))}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                         placeholder="1, 2, 3"
                       />

@@ -51,13 +51,25 @@ app.get('/health', (req, res) => {
 
 // Middleware de tratamento de erros
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  logger.error('Erro não tratado:', err);
+  logger.error('Erro não tratado:', {
+    message: err.message,
+    stack: err.stack,
+    path: req.path,
+    method: req.method,
+    body: req.body
+  });
   
-  res.status(err.status || 500).json({
+  const statusCode = err.status || err.statusCode || 500;
+  
+  res.status(statusCode).json({
     success: false,
     error: process.env.NODE_ENV === 'production' 
       ? 'Erro interno do servidor' 
-      : err.message
+      : err.message,
+    ...(process.env.NODE_ENV !== 'production' && {
+      details: err.details || err.stack,
+      path: req.path
+    })
   });
 });
 

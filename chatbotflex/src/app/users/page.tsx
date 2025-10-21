@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import MainLayout from '@/components/layout/MainLayout';
 import { usePermissions } from '@/hooks/usePermissions';
 import { auth, db } from '@/lib/firebase';
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
@@ -152,9 +153,11 @@ export default function UsersPage() {
   if (permissionsLoading) {
     return (
       <ProtectedRoute>
-        <div className="min-h-screen flex items-center justify-center">
-          <Loader2 className="animate-spin h-8 w-8 text-indigo-600" />
-        </div>
+        <MainLayout>
+          <div className="min-h-screen flex items-center justify-center">
+            <Loader2 className="animate-spin h-8 w-8 text-indigo-600" />
+          </div>
+        </MainLayout>
       </ProtectedRoute>
     );
   }
@@ -162,21 +165,24 @@ export default function UsersPage() {
   if (!canCreateUsers) {
     return (
       <ProtectedRoute>
-        <div className="min-h-screen flex items-center justify-center bg-gray-50">
-          <div className="text-center">
-            <Shield className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-            <h1 className="text-xl font-semibold text-gray-900 mb-2">Acesso Negado</h1>
-            <p className="text-gray-600">Você não tem permissão para acessar esta página.</p>
+        <MainLayout>
+          <div className="min-h-screen flex items-center justify-center bg-gray-50">
+            <div className="text-center">
+              <Shield className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+              <h1 className="text-xl font-semibold text-gray-900 mb-2">Acesso Negado</h1>
+              <p className="text-gray-600">Você não tem permissão para acessar esta página.</p>
+            </div>
           </div>
-        </div>
+        </MainLayout>
       </ProtectedRoute>
     );
   }
 
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <MainLayout>
+        <div className="min-h-screen bg-gray-50">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="mb-8">
             <div className="flex items-center justify-between">
               <div>
@@ -396,7 +402,8 @@ export default function UsersPage() {
             </div>
           </div>
         </div>
-      </div>
+        </div>
+      </MainLayout>
     </ProtectedRoute>
   );
 }

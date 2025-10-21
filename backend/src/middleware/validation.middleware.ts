@@ -10,7 +10,7 @@ export const validate = (schema: ZodSchema) => {
       next();
     } catch (error) {
       if (error instanceof z.ZodError) {
-        const messages = error.errors.map(err => `${err.path.join('.')}: ${err.message}`);
+        const messages = error.issues.map(err => `${err.path.join('.')}: ${err.message}`);
         next(new ValidationError(messages.join(', ')));
       } else {
         next(error);
@@ -21,37 +21,52 @@ export const validate = (schema: ZodSchema) => {
 
 // Schemas de validação
 export const schemas = {
-  // Bot Flow
+  // Bot Flow - Schema compatível com ReactFlow
   createBotFlow: z.object({
     name: z.string().min(3, 'Nome deve ter pelo menos 3 caracteres').max(100, 'Nome muito longo'),
     trigger: z.object({
-      type: z.enum(['keyword', 'intent']),
+      type: z.string(), // Aceitar qualquer string (any, keywords, etc.)
       value: z.string().min(1, 'Valor do trigger é obrigatório'),
     }),
     nodes: z.array(z.object({
       id: z.string(),
-      type: z.enum(['message', 'menu', 'question', 'condition', 'transfer']),
-      content: z.string().min(1, 'Conteúdo é obrigatório'),
-      options: z.array(z.string()).optional(),
-      nextNode: z.string().optional(),
-      conditions: z.array(z.any()).optional(),
+      type: z.string(), // Aceitar qualquer tipo de nó do ReactFlow
+      position: z.object({
+        x: z.number(),
+        y: z.number(),
+      }).optional(),
+      data: z.any(), // Dados flexíveis do nó
     })).min(1, 'Pelo menos um nó é necessário'),
+    edges: z.array(z.object({
+      id: z.string().optional(),
+      source: z.string(),
+      target: z.string(),
+      type: z.string().optional(),
+    })).optional(),
+    isActive: z.boolean().optional(),
   }),
 
   updateBotFlow: z.object({
     name: z.string().min(3).max(100).optional(),
     isActive: z.boolean().optional(),
     trigger: z.object({
-      type: z.enum(['keyword', 'intent']),
+      type: z.string(),
       value: z.string().min(1),
     }).optional(),
     nodes: z.array(z.object({
       id: z.string(),
-      type: z.enum(['message', 'menu', 'question', 'condition', 'transfer']),
-      content: z.string().min(1),
-      options: z.array(z.string()).optional(),
-      nextNode: z.string().optional(),
-      conditions: z.array(z.any()).optional(),
+      type: z.string(),
+      position: z.object({
+        x: z.number(),
+        y: z.number(),
+      }).optional(),
+      data: z.any(),
+    })).optional(),
+    edges: z.array(z.object({
+      id: z.string().optional(),
+      source: z.string(),
+      target: z.string(),
+      type: z.string().optional(),
     })).optional(),
   }),
 
@@ -125,5 +140,19 @@ export const schemas = {
       frequency: z.enum(['daily', 'weekly', 'monthly']),
       until: z.string().datetime(),
     }).optional(),
+  }),
+
+  // Feedback
+  createFeedback: z.object({
+    conversationId: z.string().min(1),
+    rating: z.number().min(1).max(5),
+    comment: z.string().max(500).optional(),
+  }),
+
+  // Department Update
+  updateDepartment: z.object({
+    name: z.string().min(3).max(100).optional(),
+    description: z.string().max(500).optional(),
+    maxConcurrentChats: z.number().min(1).max(100).optional(),
   }),
 };

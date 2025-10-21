@@ -8,6 +8,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import api from '@/lib/api';
 import { Bot, Plus, Edit, Trash2, Power, PowerOff, Loader2, Shield } from 'lucide-react';
 import { toast } from 'sonner';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
 interface BotFlow {
   id: string;
@@ -27,6 +28,9 @@ export default function BotFlowsPage() {
   const { isAdmin, loading: permissionsLoading } = usePermissions();
   const [flows, setFlows] = useState<BotFlow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [selectedFlow, setSelectedFlow] = useState<BotFlow | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     fetchFlows();
@@ -65,18 +69,23 @@ export default function BotFlowsPage() {
     }
   };
 
-  const handleDeleteFlow = async (flowId: string) => {
-    if (!confirm('Tem certeza que deseja deletar este fluxo?')) return;
+  const handleDeleteFlow = async () => {
+    if (!selectedFlow) return;
 
     try {
-      const response = await api.delete(`/bot/flows/${flowId}`);
+      setDeleting(true);
+      const response = await api.delete(`/bot/flows/${selectedFlow.id}`);
       if (response.data.success) {
         toast.success('Fluxo deletado com sucesso');
         fetchFlows();
+        setShowDeleteConfirm(false);
+        setSelectedFlow(null);
       }
     } catch (error) {
       console.error('Erro ao deletar fluxo:', error);
       toast.error('Erro ao deletar fluxo');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -205,7 +214,10 @@ export default function BotFlowsPage() {
                       </button>
                       
                       <button
-                        onClick={() => handleDeleteFlow(flow.id)}
+                        onClick={() => {
+                          setSelectedFlow(flow);
+                          setShowDeleteConfirm(true);
+                        }}
                         className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-md"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -217,6 +229,22 @@ export default function BotFlowsPage() {
             </div>
           )}
         </div>
+
+        {/* Confirm Delete Dialog */}
+        <ConfirmDialog
+          isOpen={showDeleteConfirm}
+          onClose={() => {
+            setShowDeleteConfirm(false);
+            setSelectedFlow(null);
+          }}
+          onConfirm={handleDeleteFlow}
+          title="Deletar Fluxo"
+          message={`Tem certeza que deseja deletar o fluxo "${selectedFlow?.name}"? Esta ação não pode ser desfeita.`}
+          confirmText="Deletar"
+          cancelText="Cancelar"
+          type="danger"
+          loading={deleting}
+        />
       </MainLayout>
     </ProtectedRoute>
   );

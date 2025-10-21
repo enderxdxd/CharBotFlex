@@ -18,6 +18,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { DashboardStats, Conversation } from '@/types';
+import { DashboardSkeleton } from '@/components/ui/Skeleton';
 
 export default function DashboardPage() {
   const { user } = useAuthStore();
@@ -121,26 +122,25 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="h-12 w-12 animate-spin rounded-full border-4 border-primary border-t-transparent mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Carregando dashboard...</p>
-        </div>
-      </div>
+      <ProtectedRoute>
+        <MainLayout>
+          <DashboardSkeleton />
+        </MainLayout>
+      </ProtectedRoute>
     );
   }
 
   return (
     <ProtectedRoute>
       <MainLayout>
-        <div className="min-h-screen bg-gray-50 p-8">
+        <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-8">
           <div className="max-w-7xl mx-auto space-y-6">
             {/* Cabeçalho */}
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">
-          Bem-vindo, {user?.displayName || user?.email || 'Operador'}!
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">
+          Bem-vindo, {user?.displayName || user?.email || 'Operador'}! 👋
         </h1>
-        <p className="text-gray-600 mt-2">
+        <p className="text-gray-600">
           Aqui está um resumo do seu sistema de atendimento
         </p>
       </div>
@@ -148,16 +148,16 @@ export default function DashboardPage() {
       {/* Cards de Estatísticas */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {/* Chats Ativos */}
-        <div className="bg-white rounded-lg shadow p-6 border border-gray-200 hover:shadow-lg transition-shadow">
+        <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100 hover:shadow-xl hover:scale-105 transition-all duration-300">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Chats Ativos</p>
-              <p className="text-3xl font-bold text-gray-900 mt-2">
+              <p className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-blue-400 bg-clip-text text-transparent mt-2">
                 {stats.activeChats}
               </p>
             </div>
-            <div className="p-3 bg-blue-100 rounded-full">
-              <MessageCircle className="h-8 w-8 text-blue-600" />
+            <div className="p-3 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg">
+              <MessageCircle className="h-8 w-8 text-white" />
             </div>
           </div>
           <div className="mt-4 flex items-center text-sm">
@@ -167,16 +167,16 @@ export default function DashboardPage() {
         </div>
 
         {/* Aguardando Atendimento */}
-        <div className="bg-white rounded-lg shadow p-6 border border-gray-200 hover:shadow-lg transition-shadow">
+        <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100 hover:shadow-xl hover:scale-105 transition-all duration-300">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Aguardando</p>
-              <p className="text-3xl font-bold text-gray-900 mt-2">
+              <p className="text-3xl font-bold bg-gradient-to-r from-yellow-600 to-yellow-400 bg-clip-text text-transparent mt-2">
                 {stats.waitingChats}
               </p>
             </div>
-            <div className="p-3 bg-yellow-100 rounded-full">
-              <Clock className="h-8 w-8 text-yellow-600" />
+            <div className="p-3 bg-gradient-to-br from-yellow-500 to-yellow-600 rounded-xl shadow-lg">
+              <Clock className="h-8 w-8 text-white" />
             </div>
           </div>
           <div className="mt-4 flex items-center text-sm">
@@ -186,16 +186,16 @@ export default function DashboardPage() {
         </div>
 
         {/* Atendidos Hoje */}
-        <div className="bg-white rounded-lg shadow p-6 border border-gray-200 hover:shadow-lg transition-shadow">
+        <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100 hover:shadow-xl hover:scale-105 transition-all duration-300">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Atendidos Hoje</p>
-              <p className="text-3xl font-bold text-gray-900 mt-2">
+              <p className="text-3xl font-bold bg-gradient-to-r from-green-600 to-green-400 bg-clip-text text-transparent mt-2">
                 {stats.closedToday}
               </p>
             </div>
-            <div className="p-3 bg-green-100 rounded-full">
-              <CheckCircle className="h-8 w-8 text-green-600" />
+            <div className="p-3 bg-gradient-to-br from-green-500 to-green-600 rounded-xl shadow-lg">
+              <CheckCircle className="h-8 w-8 text-white" />
             </div>
           </div>
           <div className="mt-4 flex items-center text-sm">
@@ -205,35 +205,35 @@ export default function DashboardPage() {
         </div>
 
         {/* Operadores Online */}
-        <div className="bg-white rounded-lg shadow p-6 border border-gray-200 hover:shadow-lg transition-shadow">
+        <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100 hover:shadow-xl hover:scale-105 transition-all duration-300">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Operadores Online</p>
-              <p className="text-3xl font-bold text-gray-900 mt-2">
+              <p className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-purple-400 bg-clip-text text-transparent mt-2">
                 {stats.operatorsOnline}
               </p>
             </div>
-            <div className="p-3 bg-purple-100 rounded-full">
-              <Users className="h-8 w-8 text-purple-600" />
+            <div className="p-3 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl shadow-lg">
+              <Users className="h-8 w-8 text-white" />
             </div>
           </div>
           <div className="mt-4 flex items-center text-sm">
-            <div className="h-2 w-2 bg-green-500 rounded-full mr-2"></div>
+            <div className="h-2 w-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
             <span className="text-gray-600">Disponíveis agora</span>
           </div>
         </div>
 
         {/* Tempo Médio de Resposta */}
-        <div className="bg-white rounded-lg shadow p-6 border border-gray-200 hover:shadow-lg transition-shadow">
+        <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100 hover:shadow-xl hover:scale-105 transition-all duration-300">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Tempo Médio</p>
-              <p className="text-3xl font-bold text-gray-900 mt-2">
+              <p className="text-3xl font-bold bg-gradient-to-r from-orange-600 to-orange-400 bg-clip-text text-transparent mt-2">
                 {formatResponseTime(stats.averageResponseTime)}
               </p>
             </div>
-            <div className="p-3 bg-orange-100 rounded-full">
-              <Clock className="h-8 w-8 text-orange-600" />
+            <div className="p-3 bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl shadow-lg">
+              <Clock className="h-8 w-8 text-white" />
             </div>
           </div>
           <div className="mt-4 flex items-center text-sm">
@@ -242,16 +242,16 @@ export default function DashboardPage() {
         </div>
 
         {/* Acurácia do Bot */}
-        <div className="bg-white rounded-lg shadow p-6 border border-gray-200 hover:shadow-lg transition-shadow">
+        <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100 hover:shadow-xl hover:scale-105 transition-all duration-300">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Acurácia do Bot</p>
-              <p className="text-3xl font-bold text-gray-900 mt-2">
+              <p className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-indigo-400 bg-clip-text text-transparent mt-2">
                 {stats.botAccuracy}%
               </p>
             </div>
-            <div className="p-3 bg-indigo-100 rounded-full">
-              <Bot className="h-8 w-8 text-indigo-600" />
+            <div className="p-3 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-xl shadow-lg">
+              <Bot className="h-8 w-8 text-white" />
             </div>
           </div>
           <div className="mt-4 flex items-center text-sm">
@@ -261,9 +261,10 @@ export default function DashboardPage() {
       </div>
 
       {/* Atividade Recente */}
-      <div className="bg-white rounded-lg shadow border border-gray-200">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">
+      <div className="bg-white rounded-xl shadow-md border border-gray-100">
+        <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white">
+          <h2 className="text-lg font-semibold text-gray-900 flex items-center">
+            <Activity className="h-5 w-5 mr-2 text-indigo-600" />
             Atividade Recente
           </h2>
         </div>

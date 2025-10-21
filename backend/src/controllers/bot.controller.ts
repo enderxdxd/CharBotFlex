@@ -59,7 +59,17 @@ export const getBotFlowById = async (req: AuthRequest, res: Response) => {
 
 export const createBotFlow = async (req: AuthRequest, res: Response) => {
   try {
+    logger.info('Criando bot flow:', { body: req.body });
+    
     const { name, trigger, nodes, edges, isActive } = req.body;
+
+    // Validar dados básicos
+    if (!name || !trigger || !nodes) {
+      return res.status(400).json({
+        success: false,
+        error: 'Dados incompletos: name, trigger e nodes são obrigatórios',
+      });
+    }
 
     const flowId = generateId();
     const flow = {
@@ -72,18 +82,26 @@ export const createBotFlow = async (req: AuthRequest, res: Response) => {
       updatedAt: new Date(),
     };
 
+    logger.info('Salvando flow no Firestore:', { flowId, flowName: name });
     await db.collection(collections.botFlows).doc(flowId).set(flow);
 
+    logger.info('Flow criado com sucesso:', { flowId });
     res.status(201).json({
       success: true,
       data: { id: flowId, ...flow },
       message: 'Fluxo criado com sucesso',
     });
-  } catch (error) {
-    logger.error('Erro ao criar fluxo:', error);
+  } catch (error: any) {
+    logger.error('Erro ao criar fluxo:', {
+      error: error.message,
+      stack: error.stack,
+      body: req.body
+    });
     res.status(500).json({
       success: false,
-      error: 'Erro ao criar fluxo',
+      error: process.env.NODE_ENV === 'production' 
+        ? 'Erro ao criar fluxo' 
+        : error.message,
     });
   }
 };

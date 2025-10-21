@@ -20,6 +20,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { toast } from 'sonner';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
 type DistributionStrategy = 'balanced' | 'sequential' | 'random';
 
@@ -50,7 +51,9 @@ export default function DepartmentsPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showUsersModal, setShowUsersModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
+  const [deleting, setDeleting] = useState(false);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -129,18 +132,23 @@ export default function DepartmentsPage() {
     }
   };
 
-  const handleDeleteDepartment = async (id: string) => {
-    if (!confirm('Tem certeza que deseja deletar este departamento?')) return;
+  const handleDeleteDepartment = async () => {
+    if (!selectedDepartment) return;
 
     try {
-      const response = await api.delete(`/departments/${id}`);
+      setDeleting(true);
+      const response = await api.delete(`/departments/${selectedDepartment.id}`);
       if (response.data.success) {
         toast.success('Departamento deletado!');
         fetchDepartments();
+        setShowDeleteConfirm(false);
+        setSelectedDepartment(null);
       }
     } catch (error) {
       console.error('Erro ao deletar departamento:', error);
       toast.error('Erro ao deletar departamento');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -344,7 +352,10 @@ export default function DepartmentsPage() {
                         Editar
                       </button>
                       <button
-                        onClick={() => handleDeleteDepartment(dept.id)}
+                        onClick={() => {
+                          setSelectedDepartment(dept);
+                          setShowDeleteConfirm(true);
+                        }}
                         className="px-3 py-2 border border-transparent text-sm font-medium rounded-md text-red-700 bg-red-100 hover:bg-red-200"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -511,6 +522,22 @@ export default function DepartmentsPage() {
             </div>
           </div>
         )}
+
+        {/* Confirm Delete Dialog */}
+        <ConfirmDialog
+          isOpen={showDeleteConfirm}
+          onClose={() => {
+            setShowDeleteConfirm(false);
+            setSelectedDepartment(null);
+          }}
+          onConfirm={handleDeleteDepartment}
+          title="Deletar Departamento"
+          message={`Tem certeza que deseja deletar o departamento "${selectedDepartment?.name}"? Esta ação não pode ser desfeita.`}
+          confirmText="Deletar"
+          cancelText="Cancelar"
+          type="danger"
+          loading={deleting}
+        />
       </MainLayout>
     </ProtectedRoute>
   );
