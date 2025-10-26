@@ -16,15 +16,9 @@ export function useAuth() {
   const router = useRouter();
 
   useEffect(() => {
+    // Escutar mudanças de autenticação
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        // Forçar refresh do token para garantir que está válido
-        try {
-          await user.getIdToken(true);
-        } catch (error) {
-          console.error('Erro ao renovar token:', error);
-        }
-      }
+      console.log('👤 Estado de autenticação:', user?.email || 'deslogado');
       setUser(user);
       setLoading(false);
     });
@@ -43,7 +37,7 @@ export function useAuth() {
     }, 50 * 60 * 1000); // 50 minutos
 
     return () => {
-      unsubscribe();
+      if (unsubscribe) unsubscribe();
       clearInterval(tokenRefreshInterval);
     };
   }, []);

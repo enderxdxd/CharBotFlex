@@ -26,6 +26,13 @@ export class SettingsService {
             defaultTimeout: 10,
             maxRetries: 3,
           },
+          autoClose: {
+            enabled: false,
+            inactivityTimeout: 30, // 30 minutos
+            sendWarningMessage: true,
+            warningTimeBeforeClose: 5, // 5 minutos antes
+            closureMessage: 'Devido à inatividade, este atendimento foi encerrado automaticamente. Se precisar de ajuda, inicie uma nova conversa. Obrigado! 👋',
+          },
           updatedAt: new Date(),
           updatedBy: 'system',
         };
@@ -34,7 +41,27 @@ export class SettingsService {
         return defaultSettings;
       }
       
-      return { id: doc.id, ...doc.data() } as ISystemSettings;
+      const data = doc.data() as ISystemSettings;
+      
+      // Migração: Adicionar autoClose se não existir
+      if (!data.autoClose) {
+        const defaultAutoClose = {
+          enabled: false,
+          inactivityTimeout: 30,
+          sendWarningMessage: true,
+          warningTimeBeforeClose: 5,
+          closureMessage: 'Devido à inatividade, este atendimento foi encerrado automaticamente. Se precisar de ajuda, inicie uma nova conversa. Obrigado! 👋',
+        };
+        
+        await db.collection(SETTINGS_COLLECTION).doc(SETTINGS_DOC_ID).update({
+          autoClose: defaultAutoClose,
+        });
+        
+        data.autoClose = defaultAutoClose;
+        logger.info('✅ Campo autoClose adicionado às configurações existentes');
+      }
+      
+      return { id: doc.id, ...data } as ISystemSettings;
     } catch (error) {
       logger.error('Erro ao buscar configurações:', error);
       throw error;

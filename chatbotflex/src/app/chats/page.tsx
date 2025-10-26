@@ -5,12 +5,15 @@ import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import MainLayout from '@/components/layout/MainLayout';
 import { useChatStore } from '@/store/chatStore';
 import { useSocket } from '@/hooks/useSocket';
-import { MessageCircle, Search, Filter, Clock, User, Send, Paperclip, Smile, ArrowLeft } from 'lucide-react';
+import { MessageCircle, Search, Filter, Clock, User, Send, Paperclip, Smile, ArrowLeft, X, CheckCircle, Plus, UserPlus } from 'lucide-react';
 import { Conversation, Message } from '@/types';
 import { ConversationSkeleton, MessageSkeleton } from '@/components/ui/Skeleton';
+import { TransferModal } from '@/components/chat/TransferModal';
+import { toast } from 'sonner';
+import api from '@/lib/api';
 
 export default function ChatsPage() {
-  const { conversations, messages, selectedConversation, fetchConversations, fetchMessages, sendMessage, setSelectedConversation } = useChatStore();
+  const { conversations, messages, selectedConversation, fetchConversations, fetchMessages, sendMessage, setSelectedConversation, closeConversation } = useChatStore();
   const socket = useSocket();
   const [messageInput, setMessageInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -18,6 +21,7 @@ export default function ChatsPage() {
   const [showMobileChat, setShowMobileChat] = useState(false);
   const [loadingConversations, setLoadingConversations] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [showTransferModal, setShowTransferModal] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -45,10 +49,12 @@ export default function ChatsPage() {
   }, [socket, selectedConversation]);
 
   const handleSelectConversation = async (conversation: Conversation) => {
+    console.log('📱 Conversa selecionada:', conversation);
     setSelectedConversation(conversation);
     setLoadingMessages(true);
     await fetchMessages(conversation.id);
     setLoadingMessages(false);
+    console.log('💬 Mensagens no store:', messages[conversation.id]);
     setShowMobileChat(true); // Mostrar chat em mobile
     
     if (socket) {
@@ -76,6 +82,40 @@ export default function ChatsPage() {
       setTimeout(scrollToBottom, 100); // Scroll após enviar
     } catch (error) {
       console.error('Erro ao enviar mensagem:', error);
+    }
+  };
+
+  const handleCloseConversation = async () => {
+    if (!selectedConversation) return;
+
+    const confirmed = window.confirm(
+      `Tem certeza que deseja encerrar a conversa com ${selectedConversation.contactName}?`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      await closeConversation(selectedConversation.id);
+      toast.success('Conversa encerrada com sucesso!');
+      setSelectedConversation(null);
+      setShowMobileChat(false);
+      await fetchConversations(); // Atualizar lista
+    } catch (error) {
+      console.error('Erro ao fechar conversa:', error);
+      toast.error('Erro ao encerrar conversa. Tente novamente.');
+    }
+  };
+
+  const handleCreateTestConversations = async () => {
+    try {
+      const response = await api.post('/test/conversations');
+      if (response.data.success) {
+        toast.success('Conversas de teste criadas!');
+        await fetchConversations();
+      }
+    } catch (error) {
+      console.error('Erro ao criar conversas de teste:', error);
+      toast.error('Erro ao criar conversas de teste');
     }
   };
 
@@ -169,9 +209,18 @@ export default function ChatsPage() {
                 ))}
               </>
             ) : filteredConversations.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-gray-400">
+              <div className="flex flex-col items-center justify-center h-full text-gray-400 p-8">
                 <MessageCircle className="h-12 w-12 mb-2" />
-                <p className="text-sm">Nenhuma conversa encontrada</p>
+                <p className="text-sm mb-4">Nenhuma conversa encontrada</p>
+                {conversations.length === 0 && (
+                  <button
+                    onClick={handleCreateTestConversations}
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Criar Conversas de Teste
+                  </button>
+                )}
               </div>
             ) : (
               filteredConversations.map((conversation) => (
@@ -243,6 +292,38 @@ export default function ChatsPage() {
                     <span className={`px-3 py-1 text-xs font-medium rounded-full ${getStatusColor(selectedConversation.status)}`}>
                       {getStatusText(selectedConversation.status)}
                     </span>
+                    
+                    {/* Botão de Transferir Conversa */}
+                    {selectedConversation.status !== 'closed' && (
+                      <button
+                        onClick={() => setShowTransferModal(true)}
+                        className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
+                        title="Transferir conversa"
+                      >
+                        <UserPlus className="h-4 w-4" />
+                        <span className="hidden sm:inline">Transferir</span>
+                      </button>
+                    )}
+                    
+                    {/* Botão de Fechar Conversa */}
+                    {selectedConversation.status !== 'closed' && (
+                      <button
+                        onClick={handleCloseConversation}
+                        className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                        title="Encerrar conversa"
+                      >
+                        <X className="h-4 w-4" />
+                        <span className="hidden sm:inline">Encerrar</span>
+                      </button>
+                    )}
+                    
+                    {/* Badge de Conversa Encerrada */}
+                    {selectedConversation.status === 'closed' && (
+                      <div className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg">
+                        <CheckCircle className="h-4 w-4" />
+                        <span className="hidden sm:inline">Encerrada</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -251,55 +332,88 @@ export default function ChatsPage() {
               <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-gray-50 to-gray-100">
                 {loadingMessages ? (
                   <MessageSkeleton />
-                ) : messages[selectedConversation.id]?.map((message: Message) => (
-                  <div
-                    key={message.id}
-                    className={`flex ${message.isFromBot ? 'justify-start' : 'justify-end'} animate-fade-in`}
-                  >
-                    <div
-                      className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl shadow-sm ${
-                        message.isFromBot
-                          ? 'bg-white text-gray-900 border border-gray-200'
-                          : 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white'
-                      }`}
-                    >
-                      <p className="text-sm">{message.content}</p>
-                      <span className={`text-xs mt-1 block ${message.isFromBot ? 'text-gray-400' : 'text-indigo-100'}`}>
-                        {new Date(message.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                      </span>
+                ) : messages[selectedConversation.id]?.length > 0 ? (
+                  messages[selectedConversation.id].map((message: Message) => {
+                    const messageType = (message as any).type;
+                    
+                    // Mensagem de sistema (transferência, etc)
+                    if (messageType === 'system') {
+                      return (
+                        <div key={message.id} className="flex justify-center my-4 animate-fade-in">
+                          <div className="px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg max-w-md">
+                            <p className="text-xs text-blue-700 text-center">{message.content}</p>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // Mensagem normal
+                    return (
+                      <div
+                        key={message.id}
+                        className={`flex ${message.isFromBot ? 'justify-start' : 'justify-end'} animate-fade-in`}
+                      >
+                        <div
+                          className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl shadow-sm ${
+                            message.isFromBot
+                              ? 'bg-white text-gray-900 border border-gray-200'
+                              : 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white'
+                          }`}
+                        >
+                          <p className="text-sm">{message.content}</p>
+                          <span className={`text-xs mt-1 block ${message.isFromBot ? 'text-gray-400' : 'text-indigo-100'}`}>
+                            {new Date(message.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="flex items-center justify-center h-full text-gray-400">
+                    <div className="text-center">
+                      <MessageCircle className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">Nenhuma mensagem ainda</p>
+                      <p className="text-xs mt-1">Envie uma mensagem para iniciar a conversa</p>
                     </div>
                   </div>
-                ))}
+                )}
                 {/* Ref para scroll automático */}
                 <div ref={messagesEndRef} />
               </div>
 
               {/* Message Input */}
               <div className="bg-white border-t border-gray-200 p-4 shadow-lg">
-                <div className="flex items-center gap-2">
-                  <button className="p-2 text-gray-400 hover:text-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors">
-                    <Paperclip className="h-5 w-5" />
-                  </button>
-                  <button className="p-2 text-gray-400 hover:text-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors">
-                    <Smile className="h-5 w-5" />
-                  </button>
-                  <input
-                    type="text"
-                    value={messageInput}
-                    onChange={(e) => setMessageInput(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                    placeholder="Digite sua mensagem..."
-                    className="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                  />
-                  <button
-                    onClick={handleSendMessage}
-                    disabled={!messageInput.trim()}
-                    className="px-5 py-3 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white rounded-xl hover:from-indigo-700 hover:to-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
-                  >
-                    <Send className="h-4 w-4" />
-                    Enviar
-                  </button>
-                </div>
+                {selectedConversation.status === 'closed' ? (
+                  <div className="flex items-center justify-center py-4 text-gray-500">
+                    <CheckCircle className="h-5 w-5 mr-2" />
+                    <span>Esta conversa foi encerrada</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <button className="p-2 text-gray-400 hover:text-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors">
+                      <Paperclip className="h-5 w-5" />
+                    </button>
+                    <button className="p-2 text-gray-400 hover:text-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors">
+                      <Smile className="h-5 w-5" />
+                    </button>
+                    <input
+                      type="text"
+                      value={messageInput}
+                      onChange={(e) => setMessageInput(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                      placeholder="Digite sua mensagem..."
+                      className="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                    />
+                    <button
+                      onClick={handleSendMessage}
+                      disabled={!messageInput.trim()}
+                      className="px-5 py-3 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white rounded-xl hover:from-indigo-700 hover:to-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
+                    >
+                      <Send className="h-4 w-4" />
+                      Enviar
+                    </button>
+                  </div>
+                )}
               </div>
             </>
           ) : (
@@ -313,6 +427,21 @@ export default function ChatsPage() {
           )}
         </div>
         </div>
+
+        {/* Modal de Transferência */}
+        {selectedConversation && (
+          <TransferModal
+            conversationId={selectedConversation.id}
+            isOpen={showTransferModal}
+            onClose={() => setShowTransferModal(false)}
+            onSuccess={() => {
+              fetchConversations();
+              if (selectedConversation) {
+                fetchMessages(selectedConversation.id);
+              }
+            }}
+          />
+        )}
       </MainLayout>
     </ProtectedRoute>
   );

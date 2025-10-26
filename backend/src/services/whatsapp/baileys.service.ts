@@ -115,10 +115,16 @@ export class BaileysService extends EventEmitter {
       content = message.message.imageMessage.caption;
     }
 
+    // Extrair nome do contato (pushName ou notifyName)
+    const contactName = message.pushName || 
+                       message.verifiedBizName || 
+                       remoteJid.split('@')[0]; // fallback para o número
+
     return {
       id: message.key.id,
       from: remoteJid,
       fromMe: message.key.fromMe || false,
+      contactName, // Nome do contato do WhatsApp
       type: this.mapMessageType(messageType),
       content,
       mediaUrl,
@@ -150,11 +156,14 @@ export class BaileysService extends EventEmitter {
     try {
       const jid = this.formatPhoneNumber(phoneNumber);
       
+      logger.info(`📤 Enviando mensagem para ${phoneNumber} (JID: ${jid})`);
+      logger.info(`📝 Conteúdo: ${text}`);
+      
       await this.sock.sendMessage(jid, { text });
       
-      logger.info(`✅ Mensagem enviada para ${phoneNumber}`);
+      logger.info(`✅ Mensagem enviada com sucesso para ${phoneNumber}`);
     } catch (error) {
-      logger.error('Erro ao enviar mensagem:', error);
+      logger.error(`❌ Erro ao enviar mensagem para ${phoneNumber}:`, error);
       throw error;
     }
   }
@@ -216,8 +225,10 @@ export class BaileysService extends EventEmitter {
     // Remove caracteres não numéricos
     let cleaned = phone.replace(/\D/g, '');
     
-    // Adiciona código do país se não tiver (Brasil = 55)
-    if (!cleaned.startsWith('55')) {
+    // Se já tem código do país (começa com 1, 55, etc), usar como está
+    // Números internacionais geralmente têm 10+ dígitos
+    // Se tiver menos de 10 dígitos, assumir que falta o código do país (Brasil = 55)
+    if (cleaned.length < 10) {
       cleaned = '55' + cleaned;
     }
     

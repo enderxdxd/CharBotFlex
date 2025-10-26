@@ -17,6 +17,8 @@ import * as analyticsController from '../controllers/analytics.controller';
 import * as feedbackController from '../controllers/feedback.controller';
 import * as exportController from '../controllers/export.controller';
 import * as schedulerController from '../controllers/scheduler.controller';
+import * as conversationController from '../controllers/conversation.controller';
+import * as testController from '../controllers/test.controller';
 
 const router = Router();
 
@@ -97,6 +99,7 @@ router.get('/settings', settingsController.getSettings as any);
 router.put('/settings', validate(schemas.updateSettings), settingsController.updateSettings as any);
 router.put('/settings/messages', settingsController.updateMessages as any);
 router.post('/settings/messages/reset', settingsController.resetMessages as any);
+router.post('/settings/auto-close/check', settingsController.runAutoCloseCheck as any);
 
 // ==========================================
 // ROTAS DE RESPOSTAS RÁPIDAS
@@ -151,5 +154,25 @@ router.get('/scheduled-messages/:id', schedulerController.getScheduledMessageByI
 router.post('/scheduled-messages', validate(schemas.scheduleMessage), schedulerController.scheduleMessage as any);
 router.put('/scheduled-messages/:id', schedulerController.updateScheduledMessage as any);
 router.delete('/scheduled-messages/:id', schedulerController.cancelScheduledMessage as any);
+
+// ==========================================
+// ROTAS DE CONVERSAS
+// ==========================================
+router.get('/conversations', conversationController.getAllConversations as any);
+router.get('/conversations/:id', conversationController.getConversationById as any);
+router.get('/conversations/:id/messages', conversationController.getConversationMessages as any);
+router.post('/conversations/:id/messages', conversationController.sendMessage as any);
+router.post('/conversations/:id/close', conversationController.closeConversation as any);
+router.post('/conversations/:id/reopen', conversationController.reopenConversation as any);
+router.post('/conversations/:id/assign', conversationController.assignConversation as any);
+router.post('/conversations/:id/transfer', conversationController.transferConversation as any);
+router.post('/conversations/:id/mark-read', conversationController.markMessagesAsRead as any);
+
+// ==========================================
+// ROTAS DE TESTE (REMOVER EM PRODUÇÃO)
+// ==========================================
+router.post('/test/conversation', testController.createTestConversation as any);
+router.post('/test/conversations', testController.createMultipleTestConversations as any);
+router.delete('/test/conversations', testController.clearTestConversations as any);
 
 export default router;

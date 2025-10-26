@@ -49,11 +49,18 @@ export class FlowEngine {
     // Buscar fluxo de boas-vindas
     const welcomeFlow = await this.getWelcomeFlow();
 
-    if (!welcomeFlow || welcomeFlow.nodes.length === 0) {
+    if (!welcomeFlow) {
+      logger.warn('⚠️ Nenhum flow encontrado - usando mensagem padrão');
+      return this.getDefaultWelcome(context);
+    }
+
+    if (!welcomeFlow.nodes || welcomeFlow.nodes.length === 0) {
+      logger.warn(`⚠️ Flow ${welcomeFlow.name} não tem nodes - usando mensagem padrão`);
       return this.getDefaultWelcome(context);
     }
 
     const firstNode = welcomeFlow.nodes[0];
+    logger.info(`✅ Usando flow: ${welcomeFlow.name} - Primeiro node: ${firstNode.id}`);
     
     return {
       message: firstNode.content,
@@ -343,18 +350,34 @@ Digite *menu* para voltar ao menu principal.`,
 
   private async getWelcomeFlow(): Promise<IBotFlow | null> {
     try {
+      logger.info('🔍 Buscando flow ativo no Firestore...');
+      
+      // Buscar qualquer fluxo ativo (não apenas 'welcome')
       const snapshot = await db.collection(collections.botFlows)
-        .where('name', '==', 'welcome')
         .where('isActive', '==', true)
         .limit(1)
         .get();
 
-      if (snapshot.empty) return null;
+      if (snapshot.empty) {
+        logger.warn('⚠️ Nenhum fluxo ativo encontrado no Firestore');
+        
+        // Tentar buscar qualquer flow (mesmo inativo) para debug
+        const allFlows = await db.collection(collections.botFlows).limit(5).get();
+        logger.info(`📊 Total de flows no banco: ${allFlows.size}`);
+        allFlows.forEach(doc => {
+          const data = doc.data();
+          logger.info(`  - Flow: ${data.name} | Ativo: ${data.isActive} | Nodes: ${data.nodes?.length || 0}`);
+        });
+        
+        return null;
+      }
 
       const doc = snapshot.docs[0];
-      return { id: doc.id, ...doc.data() } as IBotFlow;
+      const flow = { id: doc.id, ...doc.data() } as IBotFlow;
+      logger.info(`✅ Fluxo ativo encontrado: ${flow.name} (${flow.id}) | Nodes: ${flow.nodes?.length || 0}`);
+      return flow;
     } catch (error) {
-      logger.error('Erro ao buscar fluxo de boas-vindas:', error);
+      logger.error('❌ Erro ao buscar fluxo de boas-vindas:', error);
       return null;
     }
   }

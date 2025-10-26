@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../types';
 import { SettingsService } from '../services/settings.service';
+import { runManualCheck } from '../jobs/conversation-auto-close.job';
 import logger from '../utils/logger';
 
 const settingsService = new SettingsService();
@@ -77,6 +78,36 @@ export const resetMessages = async (req: AuthRequest, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Erro ao resetar mensagens',
+    });
+  }
+};
+
+export const runAutoCloseCheck = async (req: AuthRequest, res: Response) => {
+  try {
+    // Verificar se o usuário tem permissão (apenas admin)
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Apenas administradores podem executar esta ação',
+      });
+    }
+
+    logger.info(`🔧 Verificação manual iniciada por ${req.user.name}`);
+    
+    // Executar verificação em background
+    runManualCheck().catch(error => {
+      logger.error('Erro na verificação manual:', error);
+    });
+    
+    res.json({
+      success: true,
+      message: 'Verificação de conversas inativas iniciada',
+    });
+  } catch (error) {
+    logger.error('Erro ao iniciar verificação manual:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao iniciar verificação manual',
     });
   }
 };

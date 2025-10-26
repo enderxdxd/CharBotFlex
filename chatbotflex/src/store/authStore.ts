@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { User } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase';
 import { signInWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
@@ -22,16 +23,21 @@ interface AuthState {
   fetchUserRole: () => Promise<void>;
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
-  user: null,
-  userRole: null,
-  loading: true,
-  error: null,
+export const useAuthStore = create<AuthState>()(
+  persist(
+    (set, get) => ({
+      user: null,
+      userRole: null,
+      loading: true,
+      error: null,
 
-  setUser: (user) => set({ user }),
-  setUserRole: (userRole) => set({ userRole }),
-  setLoading: (loading) => set({ loading }),
-  setError: (error) => set({ error }),
+      setUser: (user) => {
+        console.log('📝 AuthStore - setUser:', user?.email || 'null');
+        set({ user });
+      },
+      setUserRole: (userRole) => set({ userRole }),
+      setLoading: (loading) => set({ loading }),
+      setError: (error) => set({ error }),
 
   signIn: async (email: string, password: string) => {
     try {
@@ -72,8 +78,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   signOut: async () => {
     try {
+      // Limpar dados do localStorage primeiro
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('firebase_auth_token');
+        localStorage.removeItem('firebase_auth_user');
+      }
+      
       await firebaseSignOut(auth);
       set({ user: null, userRole: null, error: null });
+      console.log('✅ Logout realizado');
     } catch (error) {
       console.error('Erro ao fazer logout:', error);
     }
@@ -102,4 +115,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ userRole: 'operator' });
     }
   },
-}));
+}),
+    {
+      name: 'auth-storage',
+      partialize: (state) => ({ userRole: state.userRole }),
+    }
+  )
+);

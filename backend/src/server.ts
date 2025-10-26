@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import routes from './routes';
 import { initSocketHandlers } from './socket/socket.handler';
 import { getWhatsAppManager } from './services/whatsapp/whatsapp.manager';
+import { startConversationAutoCloseJob } from './jobs/conversation-auto-close.job';
 import logger from './utils/logger';
 
 // Configurar variáveis de ambiente
@@ -76,11 +77,15 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 // Configurar Socket.IO handlers
 initSocketHandlers(io);
 
-// Inicializar WhatsApp Manager
+// Inicializar WhatsApp Manager e Jobs
 async function initializeServices() {
   try {
     const whatsappManager = getWhatsAppManager();
     await whatsappManager.initialize();
+    
+    // Iniciar job de auto-fechamento de conversas
+    startConversationAutoCloseJob();
+    
     logger.info('✅ Serviços inicializados com sucesso');
   } catch (error) {
     logger.error('❌ Erro ao inicializar serviços:', error);

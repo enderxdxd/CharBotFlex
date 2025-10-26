@@ -19,6 +19,13 @@ export interface ISystemSettings {
     defaultTimeout: number; // Tempo em minutos para timeout
     maxRetries: number; // Máximo de tentativas antes de transferir
   };
+  autoClose: {
+    enabled: boolean;
+    inactivityTimeout: number; // Tempo em minutos de inatividade antes de fechar
+    sendWarningMessage: boolean; // Enviar mensagem de aviso antes de fechar
+    warningTimeBeforeClose: number; // Tempo em minutos antes de fechar para enviar aviso
+    closureMessage: string; // Mensagem ao fechar por inatividade
+  };
   updatedAt: Date;
   updatedBy: string;
 }

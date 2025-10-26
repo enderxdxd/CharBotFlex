@@ -1,5 +1,10 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { 
+  getAuth, 
+  setPersistence, 
+  browserLocalPersistence,
+  indexedDBLocalPersistence
+} from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -14,17 +19,27 @@ const firebaseConfig = {
 // Inicializar apenas se ainda não foi inicializado
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
+// Inicializar Auth
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
-// Configurar persistência LOCAL (mantém login mesmo fechando o navegador)
+// SOLUÇÃO DEFINITIVA: Usar IndexedDB (mais confiável que localStorage)
 if (typeof window !== 'undefined') {
-  setPersistence(auth, browserLocalPersistence)
+  // Tentar IndexedDB primeiro, fallback para localStorage
+  setPersistence(auth, indexedDBLocalPersistence)
     .then(() => {
-      console.log('✅ Persistência de login configurada');
+      console.log('✅ Persistência configurada com IndexedDB');
     })
     .catch((error) => {
-      console.error('❌ Erro ao configurar persistência:', error);
+      console.warn('⚠️ IndexedDB falhou, usando localStorage:', error);
+      // Fallback para localStorage
+      return setPersistence(auth, browserLocalPersistence);
+    })
+    .then(() => {
+      console.log('✅ Firebase Auth pronto');
+    })
+    .catch((error) => {
+      console.error('❌ ERRO CRÍTICO ao configurar persistência:', error);
     });
 }
 

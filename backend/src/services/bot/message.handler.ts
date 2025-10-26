@@ -19,21 +19,32 @@ export class MessageHandler {
 
   async handleIncomingMessage(message: any, source: 'baileys' | 'official') {
     try {
+      logger.info('🔔 handleIncomingMessage CHAMADO:', {
+        from: message.from,
+        content: message.content,
+        fromMe: message.fromMe,
+        source
+      });
+
       // IMPORTANTE: Ignorar mensagens enviadas pelo próprio bot
       if (message.fromMe || message.key?.fromMe) {
-        logger.debug('Ignorando mensagem enviada pelo bot');
+        logger.debug('⏭️ Ignorando mensagem enviada pelo bot');
         return;
       }
 
       const phoneNumber = message.from.replace('@s.whatsapp.net', '');
       const content = message.content;
+      const contactName = message.contactName || phoneNumber;
 
-      logger.info(`📨 Mensagem recebida de ${phoneNumber}: ${content}`);
+      logger.info(`📨 Mensagem recebida de ${contactName} (${phoneNumber}): ${content}`);
 
       // Buscar ou criar conversa
-      const conversation = await this.getOrCreateConversation(phoneNumber, source);
+      logger.info('🔍 Buscando ou criando conversa...');
+      const conversation = await this.getOrCreateConversation(phoneNumber, contactName, source);
+      logger.info(`✅ Conversa obtida: ${conversation.id}`);
 
       // Salvar mensagem
+      logger.info('💾 Salvando mensagem no Firestore...');
       await this.saveMessage({
         conversationId: conversation.id,
         from: phoneNumber,
@@ -42,6 +53,7 @@ export class MessageHandler {
         content,
         timestamp: message.timestamp || new Date(),
       });
+      logger.info('✅ Mensagem salva com sucesso!');
 
       // Emitir evento via Socket.IO
       io.emit('message:new', {
@@ -63,11 +75,12 @@ export class MessageHandler {
         logger.info(`Conversa ${conversation.id} em atendimento humano`);
       }
     } catch (error) {
-      logger.error('Erro ao processar mensagem:', error);
+      logger.error('❌ ERRO CRÍTICO ao processar mensagem:', error);
+      logger.error('Stack trace:', (error as Error).stack);
     }
   }
 
-  private async getOrCreateConversation(phoneNumber: string, source: 'baileys' | 'official') {
+  private async getOrCreateConversation(phoneNumber: string, contactName: string, source: 'baileys' | 'official') {
     // Buscar conversa existente
     const snapshot = await db.collection(collections.conversations)
       .where('phoneNumber', '==', phoneNumber)
@@ -77,14 +90,25 @@ export class MessageHandler {
 
     if (!snapshot.empty) {
       const doc = snapshot.docs[0];
-      return { id: doc.id, ...doc.data() };
+      const data = doc.data();
+      
+      // Atualizar nome do contato se mudou
+      if (data.contactName !== contactName && contactName !== phoneNumber) {
+        await db.collection(collections.conversations).doc(doc.id).update({
+          contactName,
+          updatedAt: new Date(),
+        });
+        logger.info(`📝 Nome do contato atualizado: ${contactName}`);
+      }
+      
+      return { id: doc.id, ...doc.data(), contactName };
     }
 
     // Criar nova conversa
     const conversationId = generateId();
     const conversation = {
       phoneNumber,
-      contactName: phoneNumber, // TODO: Buscar nome do contato
+      contactName, // Usar nome do WhatsApp
       status: 'bot',
       context: {
         stage: 'initial',
@@ -94,13 +118,15 @@ export class MessageHandler {
       tags: [],
       priority: 'medium',
       source,
+      lastActivity: new Date(),
+      unreadCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
 
     await db.collection(collections.conversations).doc(conversationId).set(conversation);
 
-    logger.info(`✅ Nova conversa criada: ${conversationId}`);
+    logger.info(`✅ Nova conversa criada: ${conversationId} para ${contactName} (${phoneNumber})`);
 
     return { id: conversationId, ...conversation };
   }
@@ -108,16 +134,28 @@ export class MessageHandler {
   private async saveMessage(data: any) {
     const messageId = generateId();
     const message = {
-      ...data,
+      conversationId: data.conversationId,
+      senderId: data.from,
+      content: data.content,
+      type: data.type || 'text',
+      timestamp: data.timestamp || new Date(),
+      isFromBot: data.from === 'bot',
+      isRead: false,
       id: messageId,
       status: 'sent',
     };
 
     await db.collection(collections.messages).doc(messageId).set(message);
 
-    // Atualizar última mensagem da conversa
+    // Atualizar última mensagem e atividade da conversa
     await db.collection(collections.conversations).doc(data.conversationId).update({
-      lastMessage: message,
+      lastMessage: {
+        id: messageId,
+        content: data.content,
+        timestamp: new Date(),
+        isFromBot: data.from === 'bot',
+      },
+      lastActivity: new Date(),
       updatedAt: new Date(),
     });
   }

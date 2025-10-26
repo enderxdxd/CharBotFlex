@@ -87,15 +87,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   fetchMessages: async (conversationId: string) => {
     try {
+      console.log('🔍 Buscando mensagens para conversa:', conversationId);
       set({ loading: true, error: null });
       
       const response = await api.get(`/conversations/${conversationId}/messages`);
       
+      console.log('📨 Resposta da API:', response.data);
+      
       if (response.data.success) {
+        console.log('✅ Mensagens recebidas:', response.data.data.length);
         get().setMessages(conversationId, response.data.data);
         set({ loading: false });
       }
     } catch (error: any) {
+      console.error('❌ Erro ao buscar mensagens:', error);
+      console.error('Detalhes do erro:', error.response?.data);
       set({ 
         error: error.response?.data?.error || 'Erro ao buscar mensagens',
         loading: false 
@@ -105,6 +111,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   sendMessage: async (conversationId: string, content: string, type: string = 'text') => {
     try {
+      console.log('📝 Enviando mensagem para conversa:', conversationId);
       const response = await api.post(`/conversations/${conversationId}/messages`, {
         content,
         type,
