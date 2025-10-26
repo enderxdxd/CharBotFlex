@@ -16,10 +16,24 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [checkingPasswordReset, setCheckingPasswordReset] = useState(true);
+  const [initialCheckDone, setInitialCheckDone] = useState(false);
+
+  useEffect(() => {
+    // Aguardar 500ms antes de verificar auth (dar tempo pro Firebase carregar)
+    const initialTimeout = setTimeout(() => {
+      setInitialCheckDone(true);
+    }, 500);
+
+    return () => clearTimeout(initialTimeout);
+  }, []);
 
   useEffect(() => {
     const checkAuth = async () => {
+      // Só verificar após timeout inicial
+      if (!initialCheckDone) return;
+
       if (!loading && !user) {
+        console.log('🚫 Usuário não autenticado - redirecionando para login');
         router.push('/auth/login');
         return;
       }
@@ -44,9 +58,10 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
     };
 
     checkAuth();
-  }, [user, loading, router, pathname]);
+  }, [user, loading, router, pathname, initialCheckDone]);
 
-  if (loading || checkingPasswordReset) {
+  // Mostrar loading durante verificação inicial OU durante check de password reset
+  if (!initialCheckDone || loading || checkingPasswordReset) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">

@@ -13,14 +13,31 @@ const api = axios.create({
 api.interceptors.request.use(
   async (config) => {
     try {
-      const user = auth.currentUser;
+      let user = auth.currentUser;
+      
+      // Se não tem usuário, aguardar até 1s para Firebase carregar sessão
+      if (!user) {
+        console.log('⏳ Aguardando Firebase carregar sessão...');
+        
+        // Tentar até 5 vezes com delay de 200ms
+        for (let i = 0; i < 5; i++) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+          user = auth.currentUser;
+          if (user) {
+            console.log('✅ Sessão carregada após', (i + 1) * 200, 'ms');
+            break;
+          }
+        }
+      }
       
       if (user) {
         const token = await user.getIdToken();
         config.headers.Authorization = `Bearer ${token}`;
+      } else {
+        console.warn('⚠️ Nenhum usuário autenticado após 1s');
       }
     } catch (error) {
-      console.error('Erro ao obter token:', error);
+      console.error('❌ Erro ao obter token:', error);
     }
     
     return config;
@@ -45,15 +62,19 @@ api.interceptors.response.use(
       switch (status) {
         case 401:
           // Token inválido ou expirado
-          console.warn('Token expirado, tentando renovar...');
+          console.warn('⚠️ 401 - Token expirado ou inválido');
           
-          // Tentar renovar token uma vez
-          if (!originalRequest._retry) {
-            originalRequest._retry = true;
+          // Dar até 2 tentativas antes de forçar logout
+          const retryCount = originalRequest._retryCount || 0;
+          
+          if (retryCount < 2) {
+            originalRequest._retryCount = retryCount + 1;
             
             try {
               const user = auth.currentUser;
               if (user) {
+                console.log(`🔄 Tentativa ${retryCount + 1}/2 de renovar token...`);
+                
                 // Forçar renovação do token
                 const newToken = await user.getIdToken(true);
                 console.log('✅ Token renovado com sucesso');
@@ -63,19 +84,38 @@ api.interceptors.response.use(
                 
                 // Tentar requisição novamente
                 return api(originalRequest);
+              } else {
+                console.warn('⚠️ Usuário não está logado');
               }
             } catch (refreshError) {
-              console.error('Erro ao renovar token:', refreshError);
+              console.error(`❌ Erro na tentativa ${retryCount + 1}:`, refreshError);
+              
+              // Se ainda tem tentativas, não fazer logout
+              if (retryCount < 1) {
+                // Aguardar 1s antes de tentar novamente
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                return api(originalRequest);
+              }
             }
           }
           
-          // Se falhou ao renovar, fazer logout
-          console.error('Não foi possível renovar token - redirecionando para login');
-          await auth.signOut();
+          // Após 2 tentativas falhadas, fazer logout suave
+          console.error('❌ Falha após 2 tentativas - fazendo logout');
           
-          // Redirecionar para login
+          // Não forçar logout imediatamente - deixar usuário decidir
           if (typeof window !== 'undefined') {
-            window.location.href = '/auth/login';
+            // Mostrar toast ao invés de redirecionar imediatamente
+            const toast = (await import('sonner')).toast;
+            toast.error('Sessão expirada. Por favor, faça login novamente.', {
+              duration: 5000,
+              action: {
+                label: 'Login',
+                onClick: () => {
+                  auth.signOut();
+                  window.location.href = '/auth/login';
+                }
+              }
+            });
           }
           break;
 

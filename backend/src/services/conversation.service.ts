@@ -77,7 +77,14 @@ export class ConversationService {
 
       const messages: IMessage[] = [];
       snapshot.forEach(doc => {
-        messages.push({ id: doc.id, ...doc.data() } as IMessage);
+        const data = doc.data();
+        logger.info(`📨 Mensagem do Firestore:`, {
+          id: doc.id,
+          content: data.content?.substring(0, 30),
+          senderId: data.senderId,
+          isFromBot: data.isFromBot,
+        });
+        messages.push({ id: doc.id, ...data } as IMessage);
       });
 
       // Ordenar no código ao invés do Firestore (evita erro de índice)

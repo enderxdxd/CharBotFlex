@@ -96,6 +96,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       
       if (response.data.success) {
         console.log('✅ Mensagens recebidas:', response.data.data.length);
+        
+        // 🔍 DEBUG: Verificar isFromBot de cada mensagem
+        response.data.data.forEach((msg: any, index: number) => {
+          console.log(`Mensagem ${index + 1}:`, {
+            content: msg.content?.substring(0, 30),
+            isFromBot: msg.isFromBot,
+            senderId: msg.senderId,
+          });
+        });
+        
         get().setMessages(conversationId, response.data.data);
         set({ loading: false });
       }

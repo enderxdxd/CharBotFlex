@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { X, UserPlus, AlertCircle } from 'lucide-react';
-import { api } from '@/lib/api';
+import api from '@/lib/api';
 import { toast } from 'sonner';
 
 interface User {

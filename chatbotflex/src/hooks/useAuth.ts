@@ -1,50 +1,20 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { 
-  User,
-  onAuthStateChanged,
-  signOut as firebaseSignOut
-} from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { useAuthStore } from '@/store/authStore';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 
+/**
+ * Hook simplificado - usa AuthStore que é gerenciado pelo AuthProvider
+ * NÃO cria listener duplicado
+ */
 export function useAuth() {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { user, loading, signOut: storeSignOut } = useAuthStore();
   const router = useRouter();
-
-  useEffect(() => {
-    // Escutar mudanças de autenticação
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      console.log('👤 Estado de autenticação:', user?.email || 'deslogado');
-      setUser(user);
-      setLoading(false);
-    });
-
-    // Renovar token a cada 50 minutos (tokens expiram em 1 hora)
-    const tokenRefreshInterval = setInterval(async () => {
-      const currentUser = auth.currentUser;
-      if (currentUser) {
-        try {
-          await currentUser.getIdToken(true);
-          console.log('🔄 Token renovado automaticamente');
-        } catch (error) {
-          console.error('Erro ao renovar token:', error);
-        }
-      }
-    }, 50 * 60 * 1000); // 50 minutos
-
-    return () => {
-      if (unsubscribe) unsubscribe();
-      clearInterval(tokenRefreshInterval);
-    };
-  }, []);
 
   const signOut = async () => {
     try {
-      await firebaseSignOut(auth);
+      await storeSignOut();
       toast.success('Logout realizado com sucesso');
       router.push('/auth/login');
     } catch (error) {

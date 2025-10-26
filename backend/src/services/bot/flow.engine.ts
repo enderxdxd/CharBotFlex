@@ -61,6 +61,16 @@ export class FlowEngine {
 
     const firstNode = welcomeFlow.nodes[0];
     logger.info(`✅ Usando flow: ${welcomeFlow.name} - Primeiro node: ${firstNode.id}`);
+    logger.info(`🔍 Estrutura do node:`, JSON.stringify(firstNode, null, 2));
+    
+    // ⚠️ CORREÇÃO: Verificar se o node tem conteúdo
+    if (!firstNode.content || firstNode.content.trim() === '') {
+      logger.warn(`⚠️ Node ${firstNode.id} não tem conteúdo - usando mensagem padrão`);
+      logger.warn(`⚠️ Tipo do node: ${firstNode.type}`);
+      return this.getDefaultWelcome(context);
+    }
+    
+    logger.info(`📝 Conteúdo do node: ${firstNode.content.substring(0, 50)}...`);
     
     return {
       message: firstNode.content,

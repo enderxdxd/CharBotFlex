@@ -1,40 +1,44 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useAuthStore } from '@/store/authStore';
-import { initAuthPersistence, hasAuthData } from '@/lib/authPersistence';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [mounted, setMounted] = useState(false);
-  const { setUser, setLoading } = useAuthStore();
+  const { setUser, setLoading, fetchUserRole } = useAuthStore();
 
   useEffect(() => {
-    setMounted(true);
+    setLoading(true);
     
-    // Inicializar persistência customizada
-    initAuthPersistence();
+    console.log('🔐 AuthProvider - Inicializando listener único');
     
-    // Verificar se há dados salvos
-    if (hasAuthData()) {
-      console.log('📦 Dados de autenticação encontrados no localStorage');
-    }
-    
-    // Escutar mudanças de autenticação
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      console.log('🔐 Auth Provider - Usuário:', user?.email || 'deslogado');
+    // ÚNICO listener de autenticação - Firebase gerencia persistência
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      const startTime = performance.now();
+      console.log('🔐 Auth State Changed:', user?.email || 'deslogado');
+      
       setUser(user);
+      
+      if (user) {
+        // Buscar role do usuário em paralelo (não bloquear)
+        fetchUserRole().catch(err => {
+          console.error('Erro ao buscar role:', err);
+        });
+      }
+      
       setLoading(false);
+      
+      const endTime = performance.now();
+      console.log(`⚡ Auth verificado em ${(endTime - startTime).toFixed(0)}ms`);
     });
 
-    return () => unsubscribe();
-  }, [setUser, setLoading]);
+    return () => {
+      console.log('🔓 AuthProvider - Removendo listener');
+      unsubscribe();
+    };
+  }, [setUser, setLoading, fetchUserRole]);
 
-  // Não renderizar nada até estar montado no cliente
-  if (!mounted) {
-    return null;
-  }
-
+  // Renderizar imediatamente - loading state é gerenciado pelo Zustand
   return <>{children}</>;
 }

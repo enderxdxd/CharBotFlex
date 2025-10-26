@@ -147,17 +147,24 @@ export class AnalyticsService {
       for (const userDoc of usersSnapshot.docs) {
         const userData = userDoc.data();
         
-        let conversationsQuery = db.collection(collections.conversations)
+        // Query simples sem índice composto
+        const conversationsQuery = db.collection(collections.conversations)
           .where('assignedTo', '==', userDoc.id);
         
+        const userConversations = await conversationsQuery.get();
+        
+        // Filtrar por data em memória (evita necessidade de índice)
+        let filteredDocs = userConversations.docs;
         if (filters.startDate) {
-          conversationsQuery = conversationsQuery.where('createdAt', '>=', filters.startDate) as any;
+          filteredDocs = filteredDocs.filter(doc => {
+            const createdAt = doc.data().createdAt?.toDate();
+            return createdAt && createdAt >= filters.startDate;
+          });
         }
         
-        const userConversations = await conversationsQuery.get();
-        const totalChats = userConversations.size;
-        const resolvedChats = userConversations.docs.filter(doc => doc.data().status === 'closed').length;
-        const activeChats = userConversations.docs.filter(doc => 
+        const totalChats = filteredDocs.length;
+        const resolvedChats = filteredDocs.filter(doc => doc.data().status === 'closed').length;
+        const activeChats = filteredDocs.filter(doc => 
           doc.data().status === 'human' || doc.data().status === 'bot'
         ).length;
         

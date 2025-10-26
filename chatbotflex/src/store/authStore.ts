@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 import { User } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase';
 import { signInWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
@@ -23,12 +22,10 @@ interface AuthState {
   fetchUserRole: () => Promise<void>;
 }
 
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set, get) => ({
+export const useAuthStore = create<AuthState>()((set, get) => ({
       user: null,
       userRole: null,
-      loading: true,
+      loading: false,
       error: null,
 
       setUser: (user) => {
@@ -78,12 +75,6 @@ export const useAuthStore = create<AuthState>()(
 
   signOut: async () => {
     try {
-      // Limpar dados do localStorage primeiro
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('firebase_auth_token');
-        localStorage.removeItem('firebase_auth_user');
-      }
-      
       await firebaseSignOut(auth);
       set({ user: null, userRole: null, error: null });
       console.log('✅ Logout realizado');
@@ -93,32 +84,36 @@ export const useAuthStore = create<AuthState>()(
   },
 
   fetchUserRole: async () => {
-    const { user } = get();
+    const { user, userRole } = get();
     
     if (!user) {
       set({ userRole: null });
       return;
     }
 
+    // Se já tem role em cache, não buscar novamente
+    if (userRole) {
+      console.log('✅ Role em cache:', userRole);
+      return;
+    }
+
     try {
+      console.log('🔍 Buscando role do usuário...');
       const userDoc = await getDoc(doc(db, 'users', user.uid));
       
       if (userDoc.exists()) {
         const userData = userDoc.data();
-        set({ userRole: userData.role || 'operator' });
+        const role = userData.role || 'operator';
+        set({ userRole: role });
+        console.log('✅ Role obtido:', role);
       } else {
         // Se não existe no Firestore, assumir que é o primeiro admin
         set({ userRole: 'admin' });
+        console.log('✅ Primeiro admin detectado');
       }
     } catch (error) {
-      console.error('Erro ao buscar role do usuário:', error);
+      console.error('❌ Erro ao buscar role:', error);
       set({ userRole: 'operator' });
     }
   },
-}),
-    {
-      name: 'auth-storage',
-      partialize: (state) => ({ userRole: state.userRole }),
-    }
-  )
-);
+}));

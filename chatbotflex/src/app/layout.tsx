@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/components/auth/AuthProvider";
+import { AuthLoading } from "@/components/auth/AuthLoading";
 
 export const metadata: Metadata = {
   title: "CharBotFlex - Sistema de Atendimento WhatsApp",
@@ -17,7 +18,9 @@ export default function RootLayout({
     <html lang="pt-BR">
       <body className="font-sans antialiased">
         <AuthProvider>
-          {children}
+          <AuthLoading>
+            {children}
+          </AuthLoading>
         </AuthProvider>
         <Toaster position="top-right" richColors />
       </body>

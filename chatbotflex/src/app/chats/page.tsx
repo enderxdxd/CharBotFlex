@@ -37,6 +37,13 @@ export default function ChatsPage() {
     if (!socket) return;
 
     socket.on('message:new', (data: any) => {
+      console.log('📨 EVENTO message:new recebido:', data);
+      console.log('📊 Dados da mensagem:', {
+        isFromBot: data.message?.isFromBot,
+        senderId: data.message?.senderId,
+        content: data.message?.content?.substring(0, 50),
+      });
+      
       if (selectedConversation && data.conversationId === selectedConversation.id) {
         fetchMessages(selectedConversation.id);
       }
@@ -362,7 +369,16 @@ export default function ChatsPage() {
                         >
                           <p className="text-sm">{message.content}</p>
                           <span className={`text-xs mt-1 block ${message.isFromBot ? 'text-gray-400' : 'text-indigo-100'}`}>
-                            {new Date(message.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                            {(() => {
+                              try {
+                                // Converter Firestore Timestamp para Date
+                                const timestamp: any = message.timestamp;
+                                const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
+                                return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                              } catch (error) {
+                                return '--:--';
+                              }
+                            })()}
                           </span>
                         </div>
                       </div>
