@@ -46,86 +46,208 @@ export class FlowEngine {
     message: string,
     context: IConversationContext
   ) {
-    // Buscar fluxo de boas-vindas
+    logger.info('🎬 === INICIANDO handleInitialMessage ===');
+    logger.info(`📝 Mensagem: "${message}"`);
+    logger.info(`📍 Context stage: ${context.stage}`);
+    
     const welcomeFlow = await this.getWelcomeFlow();
-
+    
     if (!welcomeFlow) {
-      logger.warn('⚠️ Nenhum flow encontrado - usando mensagem padrão');
+      logger.error('❌❌❌ ERRO: welcomeFlow é NULL!');
+      return this.getDefaultWelcome(context);
+    }
+    
+    if (!welcomeFlow.nodes) {
+      logger.error('❌❌❌ ERRO: welcomeFlow.nodes é NULL/UNDEFINED!');
+      logger.error('❌ Flow completo:', JSON.stringify(welcomeFlow, null, 2));
+      return this.getDefaultWelcome(context);
+    }
+    
+    if (welcomeFlow.nodes.length === 0) {
+      logger.error('❌❌❌ ERRO: welcomeFlow.nodes está VAZIO!');
+      logger.error('❌ Flow completo:', JSON.stringify(welcomeFlow, null, 2));
+      return this.getDefaultWelcome(context);
+    }
+    
+    logger.info(`✅ Flow encontrado: "${welcomeFlow.name}" com ${welcomeFlow.nodes.length} nodes`);
+    logger.info(`📋 Nodes do flow:`, welcomeFlow.nodes.map(n => ({ id: n.id, type: n.type, hasLabel: !!(n as any).label, hasContent: !!n.content })));
+
+    // ✅ BUSCAR O TRIGGER NODE (não o primeiro node aleatório)
+    const triggerNode = welcomeFlow.nodes.find(node => node.type === 'trigger');
+    
+    if (!triggerNode) {
+      logger.warn('⚠️ Flow sem trigger node - usando primeiro node');
+      const firstNode = welcomeFlow.nodes[0];
+      if (firstNode.content) {
+        return {
+          message: firstNode.content,
+          context: { ...context, stage: firstNode.id, lastIntent: 'welcome' },
+        };
+      }
       return this.getDefaultWelcome(context);
     }
 
-    if (!welcomeFlow.nodes || welcomeFlow.nodes.length === 0) {
-      logger.warn(`⚠️ Flow ${welcomeFlow.name} não tem nodes - usando mensagem padrão`);
+    logger.info(`✅ Trigger encontrado: ${triggerNode.id}`);
+
+    // ✅ CORREÇÃO CRÍTICA: Na primeira mensagem (stage === 'initial'), SEMPRE ativar o trigger
+    // Ignorar keywords na primeira interação
+    if (context.stage === 'initial') {
+      logger.info('🎯 Primeira mensagem do usuário - ATIVANDO TRIGGER automaticamente (ignorando keywords)');
+    } else {
+      // Verificar keywords apenas em mensagens subsequentes
+      const shouldTrigger = this.shouldTriggerNode(triggerNode, message);
+      
+      if (!shouldTrigger) {
+        logger.info('⏭️ Trigger não ativado para esta mensagem');
+        return { message: '', context };
+      }
+    }
+
+    // ✅ BUSCAR O PRÓXIMO NODE APÓS O TRIGGER usando EDGES
+    logger.info(`🔍 Buscando próximo node do trigger usando edges...`);
+    logger.info(`🔍 Trigger ID: ${triggerNode.id}`);
+    logger.info(`🔍 Edges disponíveis:`, welcomeFlow.edges?.map(e => ({ source: e.source, target: e.target })));
+    
+    // Buscar edge que sai do trigger
+    const triggerEdge = welcomeFlow.edges?.find(e => e.source === triggerNode.id);
+    
+    if (!triggerEdge) {
+      logger.error(`❌ ERRO: Trigger "${triggerNode.id}" não tem nenhuma conexão (edge)!`);
+      logger.error(`❌ Edges disponíveis:`, welcomeFlow.edges);
+      return this.getDefaultWelcome(context);
+    }
+    
+    logger.info(`✅ Edge encontrado: ${triggerEdge.source} → ${triggerEdge.target}`);
+    
+    // Buscar o node de destino
+    const firstMessageNode = welcomeFlow.nodes.find(n => n.id === triggerEdge.target);
+    
+    if (!firstMessageNode) {
+      logger.error(`❌ ERRO: Edge aponta para node "${triggerEdge.target}" mas esse node NÃO EXISTE!`);
+      logger.error(`❌ Nodes disponíveis: ${welcomeFlow.nodes.map(n => n.id).join(', ')}`);
       return this.getDefaultWelcome(context);
     }
 
-    const firstNode = welcomeFlow.nodes[0];
-    logger.info(`✅ Usando flow: ${welcomeFlow.name} - Primeiro node: ${firstNode.id}`);
-    logger.info(`🔍 Estrutura do node:`, JSON.stringify(firstNode, null, 2));
+    logger.info(`✅ Node encontrado: ${firstMessageNode.id} (tipo: ${firstMessageNode.type})`);
     
-    // ⚠️ CORREÇÃO: Verificar se o node tem conteúdo
-    if (!firstNode.content || firstNode.content.trim() === '') {
-      logger.warn(`⚠️ Node ${firstNode.id} não tem conteúdo - usando mensagem padrão`);
-      logger.warn(`⚠️ Tipo do node: ${firstNode.type}`);
+    // ✅ CORREÇÃO: Aceitar content, label, ou data.label (ReactFlow usa data.label)
+    const nodeMessage = firstMessageNode.content || 
+                       (firstMessageNode as any).label || 
+                       (firstMessageNode.data as any)?.label;
+    logger.info(`📝 Conteúdo do node:`, nodeMessage);
+
+    if (!nodeMessage) {
+      logger.error(`❌ ERRO: Node ${firstMessageNode.id} NÃO TEM CONTEÚDO nem LABEL!`);
+      logger.error(`❌ Estrutura do node:`, JSON.stringify(firstMessageNode, null, 2));
       return this.getDefaultWelcome(context);
     }
-    
-    logger.info(`📝 Conteúdo do node: ${firstNode.content.substring(0, 50)}...`);
-    
+
+    logger.info(`✅ Primeira mensagem do flow: ${nodeMessage.substring(0, 50)}...`);
+
+    // Retornar apenas a PRIMEIRA mensagem e atualizar stage
     return {
-      message: firstNode.content,
+      message: nodeMessage,
       context: {
         ...context,
-        stage: firstNode.id,
+        stage: firstMessageNode.id,
         lastIntent: 'welcome',
       },
     };
   }
 
+  // ✅ NOVO MÉTODO: Verificar se trigger deve ser ativado
+  private shouldTriggerNode(triggerNode: IFlowNode, message: string): boolean {
+    const data = triggerNode.data || {};
+    
+    logger.info(`🔍 Verificando trigger:`, {
+      triggerType: data.triggerType,
+      keywords: data.keywords,
+      message: message,
+    });
+    
+    // ✅ CORREÇÃO: Trigger universal (responde a qualquer mensagem)
+    // Ativar se:
+    // 1. triggerType === 'any'
+    // 2. Não tem keywords
+    // 3. Keywords está vazio
+    // 4. Keywords tem apenas strings vazias
+    if (
+      data.triggerType === 'any' || 
+      !data.keywords || 
+      data.keywords.length === 0 ||
+      (Array.isArray(data.keywords) && data.keywords.every((k: string) => !k || k.trim() === ''))
+    ) {
+      logger.info('✅ Trigger universal - ATIVADO (responde a qualquer mensagem)');
+      return true;
+    }
+    
+    // Trigger por keywords específicas
+    if (data.keywords && Array.isArray(data.keywords)) {
+      const validKeywords = data.keywords.filter((k: string) => k && k.trim() !== '');
+      
+      // Se não tem keywords válidas, ativar sempre
+      if (validKeywords.length === 0) {
+        logger.info('✅ Trigger sem keywords válidas - ATIVADO (responde a qualquer mensagem)');
+        return true;
+      }
+      
+      const lowerMessage = message.toLowerCase().trim();
+      const matched = validKeywords.some((keyword: string) => 
+        lowerMessage.includes(keyword.toLowerCase())
+      );
+      
+      if (matched) {
+        logger.info('✅ Keyword encontrada - ATIVADO');
+      } else {
+        logger.warn(`⚠️ Nenhuma keyword encontrada. Keywords: ${validKeywords.join(', ')}`);
+        logger.warn(`⚠️ Mensagem recebida: "${message}"`);
+      }
+      
+      return matched;
+    }
+    
+    logger.info('✅ Trigger padrão - ATIVADO (responde a qualquer mensagem)');
+    return true; // Default: ativar sempre
+  }
+
   private getDefaultWelcome(context: IConversationContext) {
+    // ❌ REMOVIDO: Fallback desativado - bot DEVE usar o flow configurado
+    logger.error('❌❌❌ ERRO CRÍTICO: getDefaultWelcome foi chamado! Isso NÃO deveria acontecer!');
+    logger.error('❌ O bot DEVE usar o flow configurado no Firestore!');
+    logger.error('❌ Verifique se o flow está ativo e tem nodes configurados corretamente!');
+    
     return {
-      message: `Olá! Bem-vindo à nossa academia! 👋
-
-Como posso ajudar você hoje?
-
-1️⃣ Horários de Funcionamento
-2️⃣ Planos e Preços
-3️⃣ Agendar Aula Experimental
-4️⃣ Falar com Atendente
-5️⃣ Modalidades Disponíveis
-
-Digite o número da opção desejada.`,
-      context: {
-        ...context,
-        stage: 'main_menu',
-        lastIntent: 'welcome',
-      },
+      message: '❌ ERRO: Nenhum fluxo configurado. Por favor, configure um fluxo ativo no sistema.',
+      context,
     };
   }
 
   private async processNode(
-    node: IFlowNode,
+    currentNode: IFlowNode,
     message: string,
     context: IConversationContext,
     flow: IBotFlow
-  ) {
-    switch (node.type) {
-      case 'menu':
-        return this.processMenuNode(node, message, context, flow);
-      
-      case 'question':
-        return this.processQuestionNode(node, message, context, flow);
-      
+  ): Promise<any> {
+    logger.info(`🔄 Processando node tipo: ${currentNode.type} (${currentNode.id})`);
+    
+    switch (currentNode.type) {
       case 'message':
-        return this.processMessageNode(node, context, flow);
+        return await this.processMessageNode(currentNode, context, flow);
+      
+      case 'input':
+        return await this.processInputNode(currentNode, message, context, flow);
+      
+      case 'condition':
+        return await this.processConditionNode(currentNode, message, context, flow);
       
       case 'transfer':
-        return this.processTransferNode(node, context);
+        return await this.processTransferNode(currentNode, context);
       
-      default:
-        return {
-          message: node.content,
-          context,
+      case 'trigger':
+        // Trigger já foi processado no início, avançar para nextNode
+        const nextNode = flow.nodes.find(n => n.id === currentNode.nextNode);
+        if (nextNode) {
+          return await this.processNode(nextNode, message, context, flow);
         };
     }
   }
@@ -222,26 +344,179 @@ Digite o número da opção desejada.`,
     node: IFlowNode,
     context: IConversationContext,
     flow: IBotFlow
-  ) {
-    // Apenas enviar mensagem e avançar
-    if (node.nextNode) {
-      const nextNode = flow.nodes.find(n => n.id === node.nextNode);
-      
+  ): Promise<any> {
+    // ✅ Aceitar content, label, ou data.label (ReactFlow usa data.label)
+    let nodeMessage = node.content || 
+                      (node as any).label || 
+                      (node.data as any)?.label;
+    
+    if (!nodeMessage) {
+      logger.warn(`⚠️ Node ${node.id} sem conteúdo`);
+      return { message: '', context };
+    }
+    
+    // ✅ SUBSTITUIR VARIÁVEIS {nome}, {email}, etc pelos valores do userData
+    nodeMessage = this.replaceVariables(nodeMessage, context.userData);
+    logger.info(`📝 Mensagem após substituição: ${nodeMessage}`);
+    
+    // ✅ CORREÇÃO: Usar edges para encontrar próximo node
+    const edges = flow.edges || [];
+    const edge = edges.find(e => e.source === node.id);
+    
+    if (edge) {
+      const nextNode = flow.nodes.find(n => n.id === edge.target);
       if (nextNode) {
+        logger.info(`➡️ Próximo node: ${nextNode.id} (${nextNode.type})`);
+        
+        // Atualizar stage para o próximo node
         return {
-          message: `${node.content}\n\n${nextNode.content}`,
+          message: nodeMessage,
           context: {
             ...context,
-            stage: nextNode.id,
+            stage: nextNode.id, // Stage = ID do próximo node (input, condition, etc)
           },
         };
       }
     }
-
+    
+    // Se não tem próximo node, manter no stage atual
     return {
-      message: node.content,
-      context,
+      message: nodeMessage,
+      context: {
+        ...context,
+        stage: node.id,
+      },
     };
+  }
+
+  // ✅ NOVO MÉTODO: processInputNode
+  private async processInputNode(
+    node: IFlowNode,
+    message: string,
+    context: IConversationContext,
+    flow: IBotFlow
+  ): Promise<any> {
+    const data = node.data || {};
+    const validation = data.validation || 'text';
+    const variableName = data.variableName || 'userInput';
+    
+    // Validar input baseado no tipo
+    const isValid = this.validateInput(message, validation);
+    
+    if (!isValid) {
+      return {
+        message: `Por favor, forneça um ${validation} válido.`,
+        context, // Mantém no mesmo stage para tentar novamente
+      };
+    }
+    
+    // Salvar dado no contexto
+    const updatedContext = {
+      ...context,
+      userData: {
+        ...context.userData,
+        [variableName]: message,
+      },
+    };
+    
+    // ✅ CORREÇÃO: Usar edges ao invés de nextNode
+    const edges = flow.edges || [];
+    const edge = edges.find(e => e.source === node.id);
+    
+    if (edge) {
+      const nextNode = flow.nodes.find(n => n.id === edge.target);
+      if (nextNode) {
+        logger.info(`✅ Input capturado: ${variableName} = ${message}`);
+        logger.info(`➡️ Avançando para node: ${nextNode.id} (${nextNode.type})`);
+        return await this.processNode(nextNode, message, updatedContext, flow);
+      }
+    }
+    
+    logger.warn(`⚠️ Input node ${node.id} não tem próximo node!`);
+    return {
+      message: 'Obrigado pela informação!',
+      context: updatedContext,
+    };
+  }
+
+  // ✅ NOVO MÉTODO: processConditionNode
+  private async processConditionNode(
+    node: IFlowNode,
+    message: string,
+    context: IConversationContext,
+    flow: IBotFlow
+  ): Promise<any> {
+    const userChoice = message.trim();
+    const data = node.data || {};
+    const conditions = data.conditions || node.options || [];
+    
+    // Buscar qual condição o usuário escolheu
+    const choiceIndex = conditions.indexOf(userChoice);
+    
+    if (choiceIndex === -1) {
+      // Escolha inválida
+      return {
+        message: `Opção inválida. Por favor, escolha uma das opções: ${conditions.join(', ')}`,
+        context, // Mantém no mesmo stage para tentar novamente
+      };
+    }
+    
+    // Buscar edges do flow para ver qual node está conectado a esta escolha
+    const edges = (flow as any).edges || [];
+    const edge = edges.find((e: any) => 
+      e.source === node.id && e.label === userChoice
+    );
+    
+    if (!edge) {
+      logger.warn(`⚠️ Nenhum edge encontrado para escolha ${userChoice} no node ${node.id}`);
+      return {
+        message: 'Desculpe, essa opção está configurada incorretamente. Digite "menu" para voltar.',
+        context,
+      };
+    }
+    
+    // Buscar o target node
+    const targetNode = flow.nodes.find(n => n.id === edge.target);
+    
+    if (!targetNode) {
+      logger.warn(`⚠️ Target node ${edge.target} não encontrado`);
+      return {
+        message: 'Desculpe, houve um erro. Digite "menu" para voltar.',
+        context,
+      };
+    }
+    
+    // Processar o próximo node
+    return await this.processNode(targetNode, message, context, flow);
+  }
+
+  /**
+   * Substitui variáveis {nome}, {email}, etc pelos valores do userData
+   */
+  private replaceVariables(message: string, userData: Record<string, any>): string {
+    let result = message;
+    
+    // Substituir cada variável {key} pelo valor em userData
+    Object.keys(userData).forEach(key => {
+      const regex = new RegExp(`\\{${key}\\}`, 'gi');
+      result = result.replace(regex, userData[key]);
+    });
+    
+    return result;
+  }
+
+  private validateInput(input: string, validation: string): boolean {
+    switch (validation) {
+      case 'email':
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input);
+      case 'phone':
+        return /^\d{10,11}$/.test(input.replace(/\D/g, ''));
+      case 'number':
+        return !isNaN(Number(input));
+      case 'text':
+      default:
+        return input.trim().length > 0;
+    }
   }
 
   private async processTransferNode(

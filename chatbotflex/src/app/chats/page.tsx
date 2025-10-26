@@ -12,6 +12,41 @@ import { TransferModal } from '@/components/chat/TransferModal';
 import { toast } from 'sonner';
 import api from '@/lib/api';
 
+// ✅ Função helper para formatar timestamp
+const formatMessageTime = (timestamp: any): string => {
+  try {
+    let date: Date;
+    
+    if (timestamp instanceof Date) {
+      date = timestamp;
+    } else if (typeof timestamp === 'string') {
+      date = new Date(timestamp);
+    } else if (timestamp?._seconds) {
+      // Firestore Timestamp serializado
+      date = new Date(timestamp._seconds * 1000);
+    } else if (timestamp?.toDate) {
+      // Firestore Timestamp nativo
+      date = timestamp.toDate();
+    } else {
+      // Fallback
+      date = new Date(timestamp);
+    }
+    
+    // Validar se é data válida
+    if (isNaN(date.getTime())) {
+      return '--:--';
+    }
+    
+    return date.toLocaleTimeString('pt-BR', { 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+  } catch (error) {
+    console.error('Erro ao formatar timestamp:', error, timestamp);
+    return '--:--';
+  }
+};
+
 export default function ChatsPage() {
   const { conversations, messages, selectedConversation, fetchConversations, fetchMessages, sendMessage, setSelectedConversation, closeConversation } = useChatStore();
   const socket = useSocket();
@@ -50,10 +85,17 @@ export default function ChatsPage() {
       fetchConversations();
     });
 
+    // ✅ Escutar evento de atualização de conversa (reordena lista)
+    socket.on('conversation:updated', (data: any) => {
+      console.log('🔄 EVENTO conversation:updated recebido:', data);
+      fetchConversations(); // Recarregar lista para reordenar
+    });
+
     return () => {
       socket.off('message:new');
+      socket.off('conversation:updated');
     };
-  }, [socket, selectedConversation]);
+  }, [socket, selectedConversation, fetchConversations, fetchMessages]);
 
   const handleSelectConversation = async (conversation: Conversation) => {
     console.log('📱 Conversa selecionada:', conversation);
@@ -129,7 +171,17 @@ export default function ChatsPage() {
   const filteredConversations = conversations.filter(conv => {
     const matchesSearch = conv.contactName.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          conv.phoneNumber.includes(searchQuery);
-    const matchesFilter = filterStatus === 'all' || conv.status === filterStatus;
+    
+    // ✅ CORREÇÃO: "Todas" mostra apenas conversas ATIVAS (não encerradas)
+    let matchesFilter = false;
+    if (filterStatus === 'all') {
+      matchesFilter = conv.status !== 'closed'; // Excluir encerradas
+    } else if (filterStatus === 'closed') {
+      matchesFilter = conv.status === 'closed'; // Apenas encerradas
+    } else {
+      matchesFilter = conv.status === filterStatus;
+    }
+    
     return matchesSearch && matchesFilter;
   });
 
@@ -203,6 +255,14 @@ export default function ChatsPage() {
                 }`}
               >
                 Ativas
+              </button>
+              <button
+                onClick={() => setFilterStatus('closed')}
+                className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
+                  filterStatus === 'closed' ? 'bg-gray-600 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                Encerradas
               </button>
             </div>
           </div>
@@ -340,7 +400,7 @@ export default function ChatsPage() {
                 {loadingMessages ? (
                   <MessageSkeleton />
                 ) : messages[selectedConversation.id]?.length > 0 ? (
-                  messages[selectedConversation.id].map((message: Message) => {
+                  messages[selectedConversation.id].map((message: Message, index: number) => {
                     const messageType = (message as any).type;
                     
                     // Mensagem de sistema (transferência, etc)
@@ -353,6 +413,14 @@ export default function ChatsPage() {
                         </div>
                       );
                     }
+
+                    // 🔍 DEBUG: Log da mensagem
+                    console.log(`Renderizando mensagem ${index + 1}:`, {
+                      content: message.content?.substring(0, 30),
+                      isFromBot: message.isFromBot,
+                      senderId: message.senderId,
+                      align: message.isFromBot ? 'ESQUERDA (bot)' : 'DIREITA (user)',
+                    });
 
                     // Mensagem normal
                     return (
@@ -369,16 +437,7 @@ export default function ChatsPage() {
                         >
                           <p className="text-sm">{message.content}</p>
                           <span className={`text-xs mt-1 block ${message.isFromBot ? 'text-gray-400' : 'text-indigo-100'}`}>
-                            {(() => {
-                              try {
-                                // Converter Firestore Timestamp para Date
-                                const timestamp: any = message.timestamp;
-                                const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
-                                return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-                              } catch (error) {
-                                return '--:--';
-                              }
-                            })()}
+                            {formatMessageTime(message.timestamp)}
                           </span>
                         </div>
                       </div>

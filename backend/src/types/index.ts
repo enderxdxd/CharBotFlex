@@ -59,12 +59,21 @@ export interface IMessage {
   status: 'sent' | 'delivered' | 'read' | 'failed';
 }
 
+export interface IFlowEdge {
+  id: string;
+  source: string;
+  target: string;
+  label?: string;
+  type?: string;
+}
+
 export interface IBotFlow {
   id: string;
   name: string;
   isActive: boolean;
   trigger: ITrigger;
   nodes: IFlowNode[];
+  edges?: IFlowEdge[]; // Conexões entre nodes (ReactFlow)
   createdAt: Date;
   updatedAt: Date;
 }
@@ -76,11 +85,12 @@ export interface ITrigger {
 
 export interface IFlowNode {
   id: string;
-  type: 'message' | 'menu' | 'question' | 'condition' | 'transfer';
+  type: 'message' | 'menu' | 'question' | 'condition' | 'transfer' | 'trigger' | 'input';
   content: string;
   options?: string[];
   nextNode?: string;
   conditions?: any[];
+  data?: Record<string, any>; // Dados adicionais do node (keywords, validation, etc)
 }
 
 export interface ITransfer {

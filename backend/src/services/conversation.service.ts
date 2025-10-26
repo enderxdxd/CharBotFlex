@@ -28,14 +28,22 @@ export class ConversationService {
         query = query.where('departmentId', '==', filters.departmentId);
       }
 
-      const snapshot = await query
-        .orderBy('lastActivity', 'desc')
-        .get();
+      // ✅ CORREÇÃO: Remover orderBy para evitar erro de índice
+      const snapshot = await query.get();
 
       const conversations: IConversation[] = [];
       snapshot.forEach((doc: any) => {
         conversations.push({ id: doc.id, ...doc.data() } as IConversation);
       });
+
+      // ✅ Ordenar no código ao invés do Firestore
+      conversations.sort((a, b) => {
+        const timeA = a.updatedAt instanceof Date ? a.updatedAt.getTime() : new Date(a.updatedAt || 0).getTime();
+        const timeB = b.updatedAt instanceof Date ? b.updatedAt.getTime() : new Date(b.updatedAt || 0).getTime();
+        return timeB - timeA; // Ordem decrescente (mais recente primeiro)
+      });
+      
+      logger.info(`📊 Primeira conversa (mais recente): ${conversations[0]?.contactName} - ${new Date(conversations[0]?.updatedAt).toLocaleString('pt-BR')}`);
 
       logger.info(`✅ ${conversations.length} conversas encontradas`);
       return conversations;
@@ -78,13 +86,43 @@ export class ConversationService {
       const messages: IMessage[] = [];
       snapshot.forEach(doc => {
         const data = doc.data();
+        
+        // ✅ Converter Firestore Timestamp para ISO string
+        let timestamp = new Date();
+        if (data.timestamp) {
+          if (data.timestamp.toDate) {
+            // Firestore Timestamp
+            timestamp = data.timestamp.toDate();
+          } else if (data.timestamp._seconds) {
+            // Timestamp serializado
+            timestamp = new Date(data.timestamp._seconds * 1000);
+          } else {
+            // Já é Date ou string
+            timestamp = new Date(data.timestamp);
+          }
+        }
+        
+        // ✅ Fallback para isFromBot
+        let isFromBot = data.isFromBot;
+        if (isFromBot === undefined || isFromBot === null) {
+          isFromBot = data.senderId === 'bot' || data.senderId === 'system';
+          logger.warn(`⚠️ Mensagem ${doc.id} sem isFromBot - usando fallback: ${isFromBot}`);
+        }
+        
         logger.info(`📨 Mensagem do Firestore:`, {
           id: doc.id,
           content: data.content?.substring(0, 30),
           senderId: data.senderId,
-          isFromBot: data.isFromBot,
+          isFromBot,
+          timestamp: timestamp.toISOString(),
         });
-        messages.push({ id: doc.id, ...data } as IMessage);
+        
+        messages.push({ 
+          id: doc.id, 
+          ...data,
+          isFromBot,
+          timestamp: timestamp.toISOString(), // ✅ Sempre retornar ISO string
+        } as any as IMessage);
       });
 
       // Ordenar no código ao invés do Firestore (evita erro de índice)
