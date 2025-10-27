@@ -10,6 +10,7 @@ export class FlowEngine {
     message?: string;
     context: IConversationContext;
     transferToHuman?: boolean;
+    department?: string;
   }> {
     try {
       // Se não tem stage, iniciar com saudação
@@ -130,29 +131,14 @@ export class FlowEngine {
 
     logger.info(`✅ Node encontrado: ${firstMessageNode.id} (tipo: ${firstMessageNode.type})`);
     
-    // ✅ CORREÇÃO: Aceitar content, label, ou data.label (ReactFlow usa data.label)
-    const nodeMessage = firstMessageNode.content || 
-                       (firstMessageNode as any).label || 
-                       (firstMessageNode.data as any)?.label;
-    logger.info(`📝 Conteúdo do node:`, nodeMessage);
-
-    if (!nodeMessage) {
-      logger.error(`❌ ERRO: Node ${firstMessageNode.id} NÃO TEM CONTEÚDO nem LABEL!`);
-      logger.error(`❌ Estrutura do node:`, JSON.stringify(firstMessageNode, null, 2));
-      return this.getDefaultWelcome(context);
+    // ✅ PROCESSAR O NODE COMPLETO (vai concatenar mensagens se necessário)
+    if (firstMessageNode.type === 'message') {
+      logger.info(`📨 Processando node de mensagem: ${firstMessageNode.id}`);
+      return await this.processMessageNode(firstMessageNode, context, welcomeFlow);
     }
-
-    logger.info(`✅ Primeira mensagem do flow: ${nodeMessage.substring(0, 50)}...`);
-
-    // Retornar apenas a PRIMEIRA mensagem e atualizar stage
-    return {
-      message: nodeMessage,
-      context: {
-        ...context,
-        stage: firstMessageNode.id,
-        lastIntent: 'welcome',
-      },
-    };
+    
+    // Se não for message, processar normalmente
+    return await this.processNode(firstMessageNode, message, context, welcomeFlow);
   }
 
   // ✅ NOVO MÉTODO: Verificar se trigger deve ser ativado
@@ -368,12 +354,36 @@ export class FlowEngine {
       if (nextNode) {
         logger.info(`➡️ Próximo node: ${nextNode.id} (${nextNode.type})`);
         
-        // Atualizar stage para o próximo node
+        // ✅ Se o próximo node também é MESSAGE, concatenar as mensagens
+        if (nextNode.type === 'message') {
+          const nextNodeMessage = nextNode.content || 
+                                 (nextNode as any).label || 
+                                 (nextNode.data as any)?.label;
+          
+          if (nextNodeMessage) {
+            const nextMessageProcessed = this.replaceVariables(nextNodeMessage, context.userData);
+            logger.info(`📝 Concatenando mensagem do próximo node: ${nextNode.id}`);
+            
+            // Encontrar o node DEPOIS do próximo (para atualizar stage corretamente)
+            const nextEdge = edges.find(e => e.source === nextNode.id);
+            const stageAfterNext = nextEdge?.target || nextNode.id;
+            
+            return {
+              message: nodeMessage + '\n\n' + nextMessageProcessed,
+              context: {
+                ...context,
+                stage: stageAfterNext,
+              },
+            };
+          }
+        }
+        
+        // Se não é message, apenas atualizar stage
         return {
           message: nodeMessage,
           context: {
             ...context,
-            stage: nextNode.id, // Stage = ID do próximo node (input, condition, etc)
+            stage: nextNode.id,
           },
         };
       }
@@ -398,7 +408,23 @@ export class FlowEngine {
   ): Promise<any> {
     const data = node.data || {};
     const validation = data.validation || 'text';
-    const variableName = data.variableName || 'userInput';
+    
+    // ✅ CORREÇÃO: Extrair variableName do label (ex: "Capturar nome" -> "nome")
+    const label = (data.label || '').toLowerCase();
+    let variableName = data.variableName;
+    
+    // Se não tem variableName, tentar extrair do label
+    if (!variableName) {
+      if (label.includes('nome')) variableName = 'nome';
+      else if (label.includes('email')) variableName = 'email';
+      else if (label.includes('telefone') || label.includes('phone')) variableName = 'telefone';
+      else variableName = 'userInput';
+    }
+    
+    logger.info(`📝 Input node: ${node.id}`);
+    logger.info(`📝 Label: ${data.label}`);
+    logger.info(`📝 VariableName detectado: ${variableName}`);
+    logger.info(`📝 Valor capturado: ${message}`);
     
     // Validar input baseado no tipo
     const isValid = this.validateInput(message, validation);
@@ -418,6 +444,8 @@ export class FlowEngine {
         [variableName]: message,
       },
     };
+    
+    logger.info(`✅ userData atualizado:`, updatedContext.userData);
     
     // ✅ CORREÇÃO: Usar edges ao invés de nextNode
     const edges = flow.edges || [];
@@ -523,13 +551,22 @@ export class FlowEngine {
     node: IFlowNode,
     context: IConversationContext
   ) {
+    // ✅ Pegar departamento do node
+    const department = (node.data as any)?.department || node.content || 'Geral';
+    const transferMessage = (node.data as any)?.label || 
+                           node.content || 
+                           'Transferindo você para um atendente. Aguarde um momento...';
+    
+    logger.info(`🔄 Transferindo para departamento: ${department}`);
+    
     return {
-      message: node.content || 'Transferindo você para um atendente. Aguarde um momento...',
+      message: transferMessage,
       context: {
         ...context,
         stage: 'transfer',
       },
       transferToHuman: true,
+      department, // ✅ Passar departamento para o handler
     };
   }
 

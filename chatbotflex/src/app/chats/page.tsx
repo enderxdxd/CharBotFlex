@@ -414,29 +414,31 @@ export default function ChatsPage() {
                       );
                     }
 
-                    // 🔍 DEBUG: Log da mensagem
+                    // ✅ CORRIGIDO: Cliente = esquerda (cinza), Sistema = direita (azul)
+                    const isFromClient = !message.isFromBot; // Cliente = NÃO é do bot
+                    
                     console.log(`Renderizando mensagem ${index + 1}:`, {
                       content: message.content?.substring(0, 30),
                       isFromBot: message.isFromBot,
-                      senderId: message.senderId,
-                      align: message.isFromBot ? 'ESQUERDA (bot)' : 'DIREITA (user)',
+                      isFromClient,
+                      align: isFromClient ? 'ESQUERDA (cliente)' : 'DIREITA (sistema)',
                     });
 
                     // Mensagem normal
                     return (
                       <div
                         key={message.id}
-                        className={`flex ${message.isFromBot ? 'justify-start' : 'justify-end'} animate-fade-in`}
+                        className={`flex ${isFromClient ? 'justify-start' : 'justify-end'} animate-fade-in`}
                       >
                         <div
                           className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl shadow-sm ${
-                            message.isFromBot
+                            isFromClient
                               ? 'bg-white text-gray-900 border border-gray-200'
                               : 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white'
                           }`}
                         >
                           <p className="text-sm">{message.content}</p>
-                          <span className={`text-xs mt-1 block ${message.isFromBot ? 'text-gray-400' : 'text-indigo-100'}`}>
+                          <span className={`text-xs mt-1 block ${isFromClient ? 'text-gray-400' : 'text-indigo-100'}`}>
                             {formatMessageTime(message.timestamp)}
                           </span>
                         </div>

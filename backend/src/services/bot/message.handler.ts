@@ -262,7 +262,7 @@ export class MessageHandler {
       // Verificar se deve transferir para humano
       if (response.transferToHuman) {
         logger.info('🔄 Transferindo para humano...');
-        await this.transferToHuman(conversation.id);
+        await this.transferToHuman(conversation.id, response.department);
       }
       
       logger.info('✅ processBotMessage concluído com sucesso!');
@@ -282,17 +282,108 @@ export class MessageHandler {
     }
   }
 
-  private async transferToHuman(conversationId: string) {
+  private async transferToHuman(conversationId: string, departmentName?: string) {
     try {
-      await db.collection(collections.conversations).doc(conversationId).update({
-        status: 'waiting',
-        updatedAt: new Date(),
-      });
-
-      logger.info(`Conversa ${conversationId} transferida para aguardar atendimento humano`);
-
-      // Emitir evento
-      io.emit('conversation:waiting', { conversationId });
+      logger.info(`🔄 Transferindo conversa ${conversationId} para departamento: ${departmentName || 'Geral'}`);
+      
+      // ✅ Buscar departamento pelo nome para pegar o ID
+      let departmentId: string | null = null;
+      if (departmentName && departmentName !== 'Geral') {
+        logger.info(`🔍 Buscando departamento por nome: ${departmentName}`);
+        const deptSnapshot = await db.collection(collections.departments)
+          .where('name', '==', departmentName)
+          .limit(1)
+          .get();
+        
+        if (!deptSnapshot.empty) {
+          departmentId = deptSnapshot.docs[0].id;
+          logger.info(`✅ Departamento encontrado: ${departmentId}`);
+        } else {
+          logger.warn(`⚠️ Departamento "${departmentName}" não encontrado no banco`);
+        }
+      }
+      
+      // ✅ Buscar operadores online
+      logger.info(`🔍 Buscando operadores online...`);
+      const usersSnapshot = await db.collection(collections.users)
+        .where('status', '==', 'online')
+        .where('role', 'in', ['operator', 'supervisor'])
+        .get();
+      
+      logger.info(`📊 Total de usuários online encontrados: ${usersSnapshot.docs.length}`);
+      
+      let availableOperators = usersSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      
+      logger.info(`👥 Todos os operadores online:`, availableOperators.map((op: any) => ({
+        id: op.id,
+        name: (op as any).name || 'N/A',
+        departmentId: op.departmentId,
+        role: op.role,
+        status: op.status
+      })));
+      
+      // Filtrar por departamento se especificado
+      if (departmentId) {
+        logger.info(`🔍 Filtrando operadores por departmentId: ${departmentId}`);
+        
+        // ✅ FILTRAR APENAS operadores do departamento específico
+        availableOperators = availableOperators.filter((op: any) => {
+          const match = op.departmentId === departmentId;
+          logger.info(`🔍 Operador ${op.id} (${(op as any).name}): departmentId="${op.departmentId}" === "${departmentId}" ? ${match}`);
+          return match;
+        });
+        
+        logger.info(`✅ Encontrados ${availableOperators.length} operadores do departamento ${departmentName}`);
+      }
+      
+      logger.info(`👥 Operadores disponíveis: ${availableOperators.length}`);
+      
+      if (availableOperators.length > 0) {
+        // ✅ Atribuir ao primeiro operador disponível
+        const assignedOperator = availableOperators[0];
+        
+        logger.info(`✅ Atribuindo conversa ${conversationId} ao operador:`, {
+          operatorId: assignedOperator.id,
+          operatorName: (assignedOperator as any).name || 'N/A',
+          department: departmentName || 'Geral',
+          status: 'human'
+        });
+        
+        await db.collection(collections.conversations).doc(conversationId).update({
+          status: 'human',
+          assignedTo: assignedOperator.id,
+          department: departmentName || 'Geral',
+          departmentId: departmentId || null,
+          updatedAt: new Date(),
+        });
+        
+        logger.info(`✅ Conversa atribuída com sucesso! Dados salvos no Firestore.`);
+        
+        // Emitir evento para o operador específico
+        io.emit('conversation:assigned', { 
+          conversationId, 
+          operatorId: assignedOperator.id,
+          department: departmentName || 'Geral'
+        });
+        
+        logger.info(`📡 Evento 'conversation:assigned' emitido para operador ${assignedOperator.id}`);
+      } else {
+        // Nenhum operador disponível, deixar em waiting
+        await db.collection(collections.conversations).doc(conversationId).update({
+          status: 'waiting',
+          department: departmentName || 'Geral',
+          departmentId: departmentId || null,
+          updatedAt: new Date(),
+        });
+        
+        logger.warn(`⚠️ Nenhum operador disponível no departamento ${departmentName || 'Geral'}`);
+        
+        // Emitir evento
+        io.emit('conversation:waiting', { conversationId, department: departmentName || 'Geral' });
+      }
     } catch (error) {
       logger.error('Erro ao transferir para humano:', error);
     }

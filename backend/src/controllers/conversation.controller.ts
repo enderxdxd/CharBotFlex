@@ -106,7 +106,7 @@ export const sendMessage = async (req: Request, res: Response) => {
     const message = await conversationService.sendMessage(id, userId, {
       content,
       type: type || 'text',
-      isFromBot: false,
+      isFromBot: true, // ✅ Mensagem do atendente = sistema (azul, direita)
     });
 
     res.json({

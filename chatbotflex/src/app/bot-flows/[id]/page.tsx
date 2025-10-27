@@ -40,32 +40,22 @@ import api from '@/lib/api';
 
 // Componentes de Nós Melhorados
 function MessageNode({ data, selected }: any) {
+  // Pegar apenas a primeira linha da mensagem
+  const firstLine = (data.label || 'Clique para editar').split('\n')[0];
+  const preview = firstLine.length > 40 ? firstLine.substring(0, 40) + '...' : firstLine;
+  
   return (
     <>
-      <div className={`px-4 py-3 shadow-lg rounded-lg bg-white border-2 ${
-        selected ? 'border-blue-600 ring-4 ring-blue-100' : 'border-blue-400'
-      } min-w-[220px] max-w-[280px] transition-all hover:shadow-xl`}>
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-blue-100 rounded">
-              <MessageSquare className="h-3.5 w-3.5 text-blue-600" />
-            </div>
-            <div className="font-semibold text-sm text-gray-900">Mensagem</div>
+      <div className={`px-3 py-2 shadow-md rounded-lg bg-white border-2 ${
+        selected ? 'border-blue-600 ring-2 ring-blue-100' : 'border-blue-400'
+      } min-w-[180px] max-w-[220px] transition-all hover:shadow-lg`}>
+        <div className="flex items-center gap-2 mb-1">
+          <div className="p-1 bg-blue-100 rounded">
+            <MessageSquare className="h-3 w-3 text-blue-600" />
           </div>
-          {data.delay && (
-            <div className="flex items-center gap-1 text-xs text-gray-500">
-              <Clock className="h-3 w-3" />
-              {data.delay}s
-            </div>
-          )}
+          <div className="font-semibold text-xs text-gray-900">💬 Mensagem</div>
         </div>
-        <div className="text-xs text-gray-600 line-clamp-2">{data.label || 'Clique para editar'}</div>
-        {data.hasMedia && (
-          <div className="mt-2 text-xs text-blue-600 flex items-center gap-1">
-            <FileText className="h-3 w-3" />
-            Com mídia
-          </div>
-        )}
+        <div className="text-xs text-gray-600 truncate">{preview}</div>
       </div>
       {/* Handles de Conexão - Todos os lados */}
       <Handle type="target" position={Position.Top} className="!bg-blue-500 !w-4 !h-4" />
@@ -77,25 +67,25 @@ function MessageNode({ data, selected }: any) {
 }
 
 function ConditionNode({ data, selected }: any) {
+  const conditionCount = data.conditions?.length || 0;
+  
   return (
     <>
-      <div className={`px-4 py-3 shadow-lg rounded-lg bg-white border-2 ${
-        selected ? 'border-yellow-600 ring-4 ring-yellow-100' : 'border-yellow-400'
-      } min-w-[220px] max-w-[280px] transition-all hover:shadow-xl`}>
-        <div className="flex items-center gap-2 mb-2">
-          <div className="p-1.5 bg-yellow-100 rounded">
-            <GitBranch className="h-3.5 w-3.5 text-yellow-600" />
+      <div className={`px-3 py-2 shadow-md rounded-lg bg-white border-2 ${
+        selected ? 'border-yellow-600 ring-2 ring-yellow-100' : 'border-yellow-400'
+      } min-w-[180px] max-w-[220px] transition-all hover:shadow-lg`}>
+        <div className="flex items-center gap-2 mb-1">
+          <div className="p-1 bg-yellow-100 rounded">
+            <GitBranch className="h-3 w-3 text-yellow-600" />
           </div>
-          <div className="font-semibold text-sm text-gray-900">Condição</div>
+          <div className="font-semibold text-xs text-gray-900">🔀 Condição</div>
         </div>
-        <div className="text-xs text-gray-600 line-clamp-2">{data.label || 'Clique para configurar'}</div>
-        {data.conditions && Array.isArray(data.conditions) && data.conditions.length > 0 && (
-          <div className="mt-2 flex gap-1">
-            {data.conditions.map((c: string, i: number) => (
-              <span key={i} className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded">
-                {c}
-              </span>
-            ))}
+        <div className="text-xs text-gray-600">
+          {data.label || 'Escolher opção'}
+        </div>
+        {conditionCount > 0 && (
+          <div className="mt-1 text-xs text-yellow-700 font-medium">
+            {conditionCount} opções
           </div>
         )}
       </div>
@@ -108,16 +98,19 @@ function ConditionNode({ data, selected }: any) {
 }
 
 function InputNode({ data, selected }: any) {
+  const firstLine = (data.label || 'Capturar dados').split('\n')[0];
+  const preview = firstLine.length > 40 ? firstLine.substring(0, 40) + '...' : firstLine;
+  
   return (
     <>
-      <div className={`px-4 py-3 shadow-lg rounded-lg bg-white border-2 ${
-        selected ? 'border-green-600 ring-4 ring-green-100' : 'border-green-400'
-      } min-w-[220px] max-w-[280px] transition-all hover:shadow-xl`}>
-        <div className="flex items-center gap-2 mb-2">
-          <div className="p-1.5 bg-green-100 rounded">
-            <Keyboard className="h-3.5 w-3.5 text-green-600" />
+      <div className={`px-3 py-2 shadow-md rounded-lg bg-white border-2 ${
+        selected ? 'border-green-600 ring-2 ring-green-100' : 'border-green-400'
+      } min-w-[180px] max-w-[220px] transition-all hover:shadow-lg`}>
+        <div className="flex items-center gap-2 mb-1">
+          <div className="p-1 bg-green-100 rounded">
+            <Keyboard className="h-3 w-3 text-green-600" />
           </div>
-          <div className="font-semibold text-sm text-gray-900">Capturar Entrada</div>
+          <div className="font-semibold text-xs text-gray-900">✍️ Capturar</div>
         </div>
         <div className="text-xs text-gray-600 line-clamp-2">{data.label || 'Aguardar resposta'}</div>
         {data.validation && (
@@ -137,23 +130,18 @@ function InputNode({ data, selected }: any) {
 function TransferNode({ data, selected }: any) {
   return (
     <>
-      <div className={`px-4 py-3 shadow-lg rounded-lg bg-white border-2 ${
-        selected ? 'border-purple-600 ring-4 ring-purple-100' : 'border-purple-400'
-      } min-w-[220px] max-w-[280px] transition-all hover:shadow-xl`}>
-        <div className="flex items-center gap-2 mb-2">
-          <div className="p-1.5 bg-purple-100 rounded">
-            <Users className="h-3.5 w-3.5 text-purple-600" />
+      <div className={`px-3 py-2 shadow-md rounded-lg bg-white border-2 ${
+        selected ? 'border-purple-600 ring-2 ring-purple-100' : 'border-purple-400'
+      } min-w-[180px] max-w-[220px] transition-all hover:shadow-lg`}>
+        <div className="flex items-center gap-2 mb-1">
+          <div className="p-1 bg-purple-100 rounded">
+            <Users className="h-3 w-3 text-purple-600" />
           </div>
-          <div className="font-semibold text-sm text-gray-900">Transferir</div>
+          <div className="font-semibold text-xs text-gray-900">👤 Transferir</div>
         </div>
-        <div className="text-xs text-gray-600 line-clamp-2">
-          {data.label || 'Para atendente humano'}
+        <div className="text-xs text-gray-600">
+          {data.department || 'Atendente'}
         </div>
-        {data.department && (
-          <div className="mt-2 text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded inline-block">
-            {data.department}
-          </div>
-        )}
       </div>
       <Handle type="target" position={Position.Top} className="!bg-purple-500 !w-4 !h-4" />
       <Handle type="target" position={Position.Left} className="!bg-purple-500 !w-4 !h-4" />
@@ -167,34 +155,20 @@ function TriggerNode({ data, selected }: any) {
   
   return (
     <>
-      <div className={`px-4 py-3 shadow-lg rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 border-2 ${
-        selected ? 'border-white ring-4 ring-indigo-200' : 'border-indigo-400'
-      } min-w-[220px] transition-all hover:shadow-xl`}>
-        <div className="flex items-center gap-2 mb-2">
-          <div className="p-1.5 bg-white/20 rounded">
-            <Zap className="h-3.5 w-3.5 text-white" />
+      <div className={`px-3 py-2 shadow-md rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 border-2 ${
+        selected ? 'border-white ring-2 ring-indigo-200' : 'border-indigo-400'
+      } min-w-[180px] max-w-[200px] transition-all hover:shadow-lg`}>
+        <div className="flex items-center gap-2 mb-1">
+          <div className="p-1 bg-white/20 rounded">
+            <Zap className="h-3 w-3 text-white" />
           </div>
-          <div className="font-semibold text-sm text-white">
-            {isUniversal ? 'Gatilho Universal' : 'Gatilho'}
+          <div className="font-semibold text-xs text-white">
+            ⚡ {data.label || 'Início'}
           </div>
         </div>
-        <div className="text-xs text-white/90">
-          {data.label || (isUniversal ? 'Responde a qualquer mensagem' : 'Início do fluxo')}
+        <div className="text-xs text-white/80">
+          {isUniversal ? 'Qualquer mensagem' : 'Com palavras-chave'}
         </div>
-        {isUniversal ? (
-          <div className="mt-2 flex items-center gap-1 text-xs text-white/80">
-            <Sparkles className="h-3 w-3" />
-            <span>Qualquer texto ativa</span>
-          </div>
-        ) : data.keywords && Array.isArray(data.keywords) && data.keywords.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1">
-            {data.keywords.map((k: string, i: number) => (
-              <span key={i} className="text-xs bg-white/20 text-white px-2 py-0.5 rounded">
-                {k}
-              </span>
-            ))}
-          </div>
-        )}
       </div>
       <Handle type="source" position={Position.Bottom} className="!bg-white !w-4 !h-4" />
       <Handle type="source" position={Position.Left} className="!bg-white !w-4 !h-4" />
@@ -336,6 +310,142 @@ const TEMPLATES = [
       { id: 'e5', source: 'condition-1', target: 'transfer-1', label: '3' },
     ],
   },
+  {
+    id: 'fitness',
+    name: 'Academia FlexFitness',
+    description: 'Sistema completo de atendimento para academia',
+    icon: '💪',
+    nodes: [
+      {
+        id: 'trigger-1',
+        type: 'trigger',
+        position: { x: 100, y: 50 },
+        data: { label: 'Início', triggerType: 'any' },
+      },
+      {
+        id: 'welcome',
+        type: 'message',
+        position: { x: 100, y: 180 },
+        data: { label: '💪 Bem-vindo(a) à FlexFitnessCenter!\nÉ um prazer ter você aqui. 🎉\nNossa missão é ajudar você a alcançar seus objetivos de saúde e performance com treinos, serviços e suporte de excelência.' },
+      },
+      {
+        id: 'menu-principal',
+        type: 'message',
+        position: { x: 100, y: 320 },
+        data: { label: '💬 Sobre qual assunto deseja falar?\nDigite o número da opção:\n\n1️⃣ Recursos Humanos (RH)\n2️⃣ Horários de Aulas\n3️⃣ Vendas\n4️⃣ Financeiro' },
+      },
+      {
+        id: 'condition-menu',
+        type: 'condition',
+        position: { x: 100, y: 460 },
+        data: { label: 'Menu Principal', conditions: ['1', '2', '3', '4'] },
+      },
+      // RH
+      {
+        id: 'rh',
+        type: 'message',
+        position: { x: -200, y: 600 },
+        data: { label: '🙌 Quer fazer parte da equipe FlexFitnessCenter?\nO melhor caminho é acessar nosso site e cadastrar seu currículo:\n👉 https://www.flexfitnesscenter.com.br/trabalhe-aqui\n\nNossa equipe entrará em contato assim que surgir uma vaga compatível com o seu perfil.\n\n1️⃣ Voltar ao menu' },
+      },
+      // Horários
+      {
+        id: 'horarios-unidade',
+        type: 'message',
+        position: { x: 100, y: 600 },
+        data: { label: '💬 Qual unidade deseja ver o horário?\nDigite o número da opção:\n\n1️⃣ Alphaville\n2️⃣ Buena Vista\n3️⃣ Marista\n4️⃣ Voltar' },
+      },
+      {
+        id: 'condition-horarios',
+        type: 'condition',
+        position: { x: 100, y: 740 },
+        data: { label: 'Escolher Unidade', conditions: ['1', '2', '3', '4'] },
+      },
+      {
+        id: 'horarios-alphaville',
+        type: 'message',
+        position: { x: -100, y: 880 },
+        data: { label: '📅 Horários das aulas - Alphaville\nhttps://www.flexfitnesscenter.com.br/horarios/alphaville\n\n1️⃣ Voltar ao menu\n2️⃣ Finalizar atendimento' },
+      },
+      {
+        id: 'horarios-buenavista',
+        type: 'message',
+        position: { x: 100, y: 880 },
+        data: { label: '📅 Horários das aulas — Unidade Buena Vista\nhttps://www.flexfitnesscenter.com.br/horarios/buena-vista\n\n1️⃣ Voltar ao menu\n2️⃣ Finalizar atendimento' },
+      },
+      {
+        id: 'horarios-marista',
+        type: 'message',
+        position: { x: 300, y: 880 },
+        data: { label: '📅 Horários das aulas - Marista\nhttps://www.flexfitnesscenter.com.br/horarios/marista\n\n1️⃣ Voltar ao menu\n2️⃣ Finalizar atendimento' },
+      },
+      // Vendas
+      {
+        id: 'vendas-unidade',
+        type: 'message',
+        position: { x: 400, y: 600 },
+        data: { label: '💬 Sobre qual unidade deseja falar?\nDigite o número da opção:\n\n1️⃣ Alphaville\n2️⃣ Marista\n3️⃣ Buena Vista\n4️⃣ Voltar' },
+      },
+      {
+        id: 'condition-vendas',
+        type: 'condition',
+        position: { x: 400, y: 740 },
+        data: { label: 'Escolher Unidade Vendas', conditions: ['1', '2', '3', '4'] },
+      },
+      {
+        id: 'vendas-alphaville',
+        type: 'message',
+        position: { x: 200, y: 880 },
+        data: { label: '⏸️ **Trancamento**\n1️⃣ Diferença de trancamento pago e afastamento\n2️⃣ Por que não aceita atestado?\n\n🕒 **Horários**\n3️⃣ Horário de funcionamento\n\n🎟️ **Aulas**\n4️⃣ Aula experimental\n5️⃣ Meu plano dá direito a convidado?\n\n💳 **Pagamentos**\n6️⃣ O pagamento do plano é recorrente?\n\n0️⃣ Voltar' },
+      },
+      {
+        id: 'vendas-marista',
+        type: 'message',
+        position: { x: 400, y: 880 },
+        data: { label: '💳 **Planos & Pagamentos**\n1️⃣ Informações sobre planos\n2️⃣ Desconto para estudantes?\n3️⃣ Valor da diária?\n\n🎟️ **Aulas**\n4️⃣ Aula experimental é paga?\n5️⃣ A academia fornece toalha?\n\n🕒 **Horários**\n6️⃣ Horário de funcionamento\n\n0️⃣ Voltar' },
+      },
+      {
+        id: 'vendas-buenavista',
+        type: 'message',
+        position: { x: 600, y: 880 },
+        data: { label: '🏷️ **Buena Vista — Valores e Planos**\n1️⃣ Qual o valor da diária?\n2️⃣ Valores das mensalidades?\n3️⃣ Tipos de planos?\n\n📅 **Aulas**\n4️⃣ Aula experimental?\n5️⃣ Horários de aulas coletivas?\n\n0️⃣ Voltar' },
+      },
+      // Financeiro - Transfer
+      {
+        id: 'transfer-financeiro',
+        type: 'transfer',
+        position: { x: 700, y: 600 },
+        data: { label: 'Transferir para Financeiro', department: 'Financeiro' },
+      },
+    ],
+    edges: [
+      { id: 'e1', source: 'trigger-1', target: 'welcome' },
+      { id: 'e2', source: 'welcome', target: 'menu-principal' },
+      { id: 'e3', source: 'menu-principal', target: 'condition-menu' },
+      
+      // Menu -> Opções
+      { id: 'e4', source: 'condition-menu', target: 'rh', label: '1' },
+      { id: 'e5', source: 'condition-menu', target: 'horarios-unidade', label: '2' },
+      { id: 'e6', source: 'condition-menu', target: 'vendas-unidade', label: '3' },
+      { id: 'e7', source: 'condition-menu', target: 'transfer-financeiro', label: '4' },
+      
+      // RH -> Voltar
+      { id: 'e8', source: 'rh', target: 'menu-principal' },
+      
+      // Horários
+      { id: 'e9', source: 'horarios-unidade', target: 'condition-horarios' },
+      { id: 'e10', source: 'condition-horarios', target: 'horarios-alphaville', label: '1' },
+      { id: 'e11', source: 'condition-horarios', target: 'horarios-buenavista', label: '2' },
+      { id: 'e12', source: 'condition-horarios', target: 'horarios-marista', label: '3' },
+      { id: 'e13', source: 'condition-horarios', target: 'menu-principal', label: '4' },
+      
+      // Vendas
+      { id: 'e14', source: 'vendas-unidade', target: 'condition-vendas' },
+      { id: 'e15', source: 'condition-vendas', target: 'vendas-alphaville', label: '1' },
+      { id: 'e16', source: 'condition-vendas', target: 'vendas-marista', label: '2' },
+      { id: 'e17', source: 'condition-vendas', target: 'vendas-buenavista', label: '3' },
+      { id: 'e18', source: 'condition-vendas', target: 'menu-principal', label: '4' },
+    ],
+  },
 ];
 
 export default function ImprovedFlowEditor() {
@@ -347,14 +457,16 @@ export default function ImprovedFlowEditor() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
-  const [showTemplates, setShowTemplates] = useState(true);
+  const [showTemplates, setShowTemplates] = useState(flowId === 'new'); // ✅ Só mostra templates se for novo
   const [saving, setSaving] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [simpleMode, setSimpleMode] = useState(true); // ✅ Modo simples por padrão
 
   useEffect(() => {
     if (flowId === 'new') {
       setShowTemplates(true);
     } else {
+      setShowTemplates(false); // ✅ Não mostrar templates ao editar
       loadFlow();
     }
   }, [flowId]);
@@ -642,19 +754,23 @@ export default function ImprovedFlowEditor() {
 
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setSimpleMode(!simpleMode)}
+              className={`px-3 py-2 rounded-lg flex items-center gap-2 transition-colors ${
+                simpleMode 
+                  ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+              title={simpleMode ? 'Modo Simples Ativo' : 'Modo Avançado Ativo'}
+            >
+              {simpleMode ? '✨ Simples' : '⚙️ Avançado'}
+            </button>
+
+            <button
               onClick={() => setShowHelp(!showHelp)}
               className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
               title="Ajuda"
             >
               <HelpCircle className="h-5 w-5" />
-            </button>
-
-            <button
-              onClick={() => toast.info('Teste em desenvolvimento')}
-              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center gap-2"
-            >
-              <Play className="h-4 w-4" />
-              Testar
             </button>
             
             <button
@@ -675,75 +791,120 @@ export default function ImprovedFlowEditor() {
           <div className="p-4">
             <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-indigo-600" />
-              Componentes
+              {simpleMode ? 'Componentes Básicos' : 'Todos os Componentes'}
             </h3>
             
-            <div className="space-y-2 mb-6">
-              <button
-                onClick={() => addNode('trigger')}
-                className="w-full flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-700 rounded-lg hover:from-indigo-100 hover:to-purple-100 transition-all border border-indigo-200"
-              >
-                <div className="p-1.5 bg-indigo-100 rounded">
-                  <Zap className="h-4 w-4" />
+            {simpleMode ? (
+              // ✅ MODO SIMPLES: Apenas componentes essenciais
+              <div className="space-y-3 mb-6">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                  <p className="text-xs text-blue-700">
+                    💡 <strong>Modo Simples:</strong> Arraste os blocos e conecte-os para criar seu fluxo!
+                  </p>
                 </div>
-                <div className="text-left flex-1">
-                  <div className="font-medium text-sm">Gatilho</div>
-                  <div className="text-xs text-indigo-600">Inicia o fluxo</div>
-                </div>
-              </button>
 
-              <button
-                onClick={() => addNode('message')}
-                className="w-full flex items-center gap-3 px-4 py-3 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-all border border-blue-200"
-              >
-                <div className="p-1.5 bg-blue-100 rounded">
-                  <MessageSquare className="h-4 w-4" />
-                </div>
-                <div className="text-left flex-1">
-                  <div className="font-medium text-sm">Mensagem</div>
-                  <div className="text-xs text-blue-600">Envia texto/mídia</div>
-                </div>
-              </button>
+                <button
+                  onClick={() => addNode('message')}
+                  className="w-full flex items-center gap-3 px-4 py-3 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-all border-2 border-blue-200"
+                >
+                  <MessageSquare className="h-5 w-5" />
+                  <div className="text-left flex-1">
+                    <div className="font-semibold">💬 Mensagem</div>
+                    <div className="text-xs">Enviar texto ao cliente</div>
+                  </div>
+                </button>
 
-              <button
-                onClick={() => addNode('input')}
-                className="w-full flex items-center gap-3 px-4 py-3 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 transition-all border border-green-200"
-              >
-                <div className="p-1.5 bg-green-100 rounded">
-                  <Keyboard className="h-4 w-4" />
-                </div>
-                <div className="text-left flex-1">
-                  <div className="font-medium text-sm">Capturar</div>
-                  <div className="text-xs text-green-600">Aguarda resposta</div>
-                </div>
-              </button>
+                <button
+                  onClick={() => addNode('input')}
+                  className="w-full flex items-center gap-3 px-4 py-3 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 transition-all border-2 border-green-200"
+                >
+                  <Keyboard className="h-5 w-5" />
+                  <div className="text-left flex-1">
+                    <div className="font-semibold">✍️ Capturar</div>
+                    <div className="text-xs">Pedir informação (nome, email...)</div>
+                  </div>
+                </button>
 
-              <button
-                onClick={() => addNode('condition')}
-                className="w-full flex items-center gap-3 px-4 py-3 bg-yellow-50 text-yellow-700 rounded-lg hover:bg-yellow-100 transition-all border border-yellow-200"
-              >
-                <div className="p-1.5 bg-yellow-100 rounded">
-                  <GitBranch className="h-4 w-4" />
-                </div>
-                <div className="text-left flex-1">
-                  <div className="font-medium text-sm">Condição</div>
-                  <div className="text-xs text-yellow-600">Ramifica fluxo</div>
-                </div>
-              </button>
+                <button
+                  onClick={() => addNode('transfer')}
+                  className="w-full flex items-center gap-3 px-4 py-3 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition-all border-2 border-purple-200"
+                >
+                  <Users className="h-5 w-5" />
+                  <div className="text-left flex-1">
+                    <div className="font-semibold">👤 Transferir</div>
+                    <div className="text-xs">Passar para atendente humano</div>
+                  </div>
+                </button>
+              </div>
+            ) : (
+              // ✅ MODO AVANÇADO: Todos os componentes
+              <div className="space-y-2 mb-6">
+                <button
+                  onClick={() => addNode('trigger')}
+                  className="w-full flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-700 rounded-lg hover:from-indigo-100 hover:to-purple-100 transition-all border border-indigo-200"
+                >
+                  <div className="p-1.5 bg-indigo-100 rounded">
+                    <Zap className="h-4 w-4" />
+                  </div>
+                  <div className="text-left flex-1">
+                    <div className="font-medium text-sm">Gatilho</div>
+                    <div className="text-xs text-indigo-600">Inicia o fluxo</div>
+                  </div>
+                </button>
 
-              <button
-                onClick={() => addNode('transfer')}
-                className="w-full flex items-center gap-3 px-4 py-3 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition-all border border-purple-200"
-              >
-                <div className="p-1.5 bg-purple-100 rounded">
-                  <Users className="h-4 w-4" />
-                </div>
-                <div className="text-left flex-1">
-                  <div className="font-medium text-sm">Transferir</div>
-                  <div className="text-xs text-purple-600">Para atendente</div>
-                </div>
-              </button>
-            </div>
+                <button
+                  onClick={() => addNode('message')}
+                  className="w-full flex items-center gap-3 px-4 py-3 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-all border border-blue-200"
+                >
+                  <div className="p-1.5 bg-blue-100 rounded">
+                    <MessageSquare className="h-4 w-4" />
+                  </div>
+                  <div className="text-left flex-1">
+                    <div className="font-medium text-sm">Mensagem</div>
+                    <div className="text-xs text-blue-600">Envia texto/mídia</div>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => addNode('input')}
+                  className="w-full flex items-center gap-3 px-4 py-3 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 transition-all border border-green-200"
+                >
+                  <div className="p-1.5 bg-green-100 rounded">
+                    <Keyboard className="h-4 w-4" />
+                  </div>
+                  <div className="text-left flex-1">
+                    <div className="font-medium text-sm">Capturar</div>
+                    <div className="text-xs text-green-600">Aguarda resposta</div>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => addNode('condition')}
+                  className="w-full flex items-center gap-3 px-4 py-3 bg-yellow-50 text-yellow-700 rounded-lg hover:bg-yellow-100 transition-all border border-yellow-200"
+                >
+                  <div className="p-1.5 bg-yellow-100 rounded">
+                    <GitBranch className="h-4 w-4" />
+                  </div>
+                  <div className="text-left flex-1">
+                    <div className="font-medium text-sm">Condição</div>
+                    <div className="text-xs text-yellow-600">Ramifica fluxo</div>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => addNode('transfer')}
+                  className="w-full flex items-center gap-3 px-4 py-3 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition-all border border-purple-200"
+                >
+                  <div className="p-1.5 bg-purple-100 rounded">
+                    <Users className="h-4 w-4" />
+                  </div>
+                  <div className="text-left flex-1">
+                    <div className="font-medium text-sm">Transferir</div>
+                    <div className="text-xs text-purple-600">Para atendente</div>
+                  </div>
+                </button>
+              </div>
+            )}
 
             {/* Propriedades do Nó */}
             {selectedNode ? (
@@ -954,7 +1115,25 @@ export default function ImprovedFlowEditor() {
         <div className="flex-1 relative">
           <ReactFlow
             nodes={nodes}
-            edges={edges}
+            edges={edges.map(edge => ({
+              ...edge,
+              // ✅ Estilo melhorado para edges com labels
+              style: {
+                stroke: edge.label ? '#f59e0b' : '#6366f1',
+                strokeWidth: edge.label ? 3 : 2.5,
+              },
+              labelStyle: {
+                fill: '#fff',
+                fontWeight: 700,
+                fontSize: 14,
+              },
+              labelBgStyle: {
+                fill: '#f59e0b',
+                fillOpacity: 1,
+              },
+              labelBgPadding: [8, 6] as [number, number],
+              labelBgBorderRadius: 6,
+            }))}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
