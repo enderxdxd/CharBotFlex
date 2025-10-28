@@ -8,17 +8,33 @@ import { initSocketHandlers } from './socket/socket.handler';
 import { getWhatsAppManager } from './services/whatsapp/whatsapp.manager';
 import { startConversationAutoCloseJob } from './jobs/conversation-auto-close.job';
 import logger from './utils/logger';
+import { validateEnv } from './config/env.validator';
 
 // Configurar variáveis de ambiente
 dotenv.config();
 
+// Validar variáveis de ambiente obrigatórias
+try {
+  validateEnv();
+} catch (error: any) {
+  logger.error('❌ Falha na validação de variáveis de ambiente:', error.message);
+  process.exit(1);
+}
+
 const app = express();
 const server = createServer(app);
+
+// Configurar origens permitidas
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://char-bot-flex-chatbotflex.vercel.app',
+  process.env.FRONTEND_URL
+].filter(Boolean);
 
 // Configurar Socket.IO
 const io = new Server(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -26,7 +42,17 @@ const io = new Server(server, {
 
 // Middlewares globais
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:3000",
+  origin: (origin, callback) => {
+    // Permitir requisições sem origin (mobile apps, Postman, etc)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      logger.warn(`❌ Origem bloqueada por CORS: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
