@@ -58,9 +58,27 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// Middleware de CORS explícito (fallback)
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  }
+  
+  // Handle preflight
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  
+  next();
+});
+
 // Middleware de logging
 app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.path} - ${req.ip}`);
+  logger.info(`${req.method} ${req.path} - ${req.ip} - Origin: ${req.headers.origin || 'none'}`);
   next();
 });
 
@@ -123,6 +141,7 @@ const PORT = process.env.PORT || 3001;
 server.listen(PORT, async () => {
   logger.info(`🚀 Servidor CharBotFlex rodando na porta ${PORT}`);
   logger.info(`📱 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
+  logger.info(`🌐 Origens CORS permitidas: ${allowedOrigins.join(', ')}`);
   
   // Inicializar serviços
   await initializeServices();
