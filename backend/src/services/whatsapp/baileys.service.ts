@@ -17,6 +17,9 @@ export class BaileysService extends EventEmitter {
   private qrCode: string | null = null;
   private isConnected: boolean = false;
   private sessionPath: string;
+  private reconnectAttempts: number = 0;
+  private maxReconnectAttempts: number = 5;
+  private reconnectDelay: number = 5000; // 5 segundos
 
   constructor() {
     super();
@@ -55,8 +58,18 @@ export class BaileysService extends EventEmitter {
 
           logger.info('Conexão fechada. Reconectar:', shouldReconnect);
 
-          if (shouldReconnect) {
-            await this.initialize();
+          if (shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
+            this.reconnectAttempts++;
+            logger.warn(`⚠️  Tentativa de reconexão ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
+            
+            setTimeout(async () => {
+              await this.initialize();
+            }, this.reconnectDelay);
+          } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            logger.error('❌ Limite de tentativas de reconexão atingido. WhatsApp desconectado.');
+            logger.info('💡 Para reconectar, acesse a página de WhatsApp e escaneie o QR Code.');
+            this.isConnected = false;
+            this.emit('disconnected');
           } else {
             this.isConnected = false;
             this.emit('disconnected');
@@ -64,6 +77,7 @@ export class BaileysService extends EventEmitter {
         } else if (connection === 'open') {
           this.isConnected = true;
           this.qrCode = null;
+          this.reconnectAttempts = 0; // Reset contador ao conectar
           logger.info('✅ Baileys conectado com sucesso!');
           this.emit('connected');
         }
