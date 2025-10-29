@@ -24,48 +24,76 @@ try {
 const app = express();
 const server = createServer(app);
 
-// Configurar origens permitidas
+// ========================================
+// CONFIGURAÇÃO CORS MELHORADA
+// ========================================
 const allowedOrigins = [
   'http://localhost:3000',
   'https://char-bot-flex-chatbotflex.vercel.app',
+  /^https:\/\/char-bot-flex.*\.vercel\.app$/, // Aceita todos os previews do Vercel
   process.env.FRONTEND_URL
 ].filter(Boolean);
+
+// Função para verificar origem permitida
+const isOriginAllowed = (origin: string | undefined): boolean => {
+  if (!origin) return true; // Permite requisições sem origin (Postman, mobile apps)
+  
+  return allowedOrigins.some(allowed => {
+    if (typeof allowed === 'string') {
+      return allowed === origin;
+    }
+    // Se for RegExp
+    return allowed.test(origin);
+  });
+};
 
 // Configurar Socket.IO
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      if (isOriginAllowed(origin)) {
+        callback(null, true);
+      } else {
+        logger.warn(`❌ Origem bloqueada por CORS: ${origin}`);
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     methods: ["GET", "POST"],
     credentials: true
   }
 });
 
-// Middlewares globais
+// Middlewares globais - CORS COMPLETO
 app.use(cors({
   origin: (origin, callback) => {
-    // Permitir requisições sem origin (mobile apps, Postman, etc)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.includes(origin)) {
+    if (isOriginAllowed(origin)) {
       callback(null, true);
     } else {
       logger.warn(`❌ Origem bloqueada por CORS: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  maxAge: 86400 // Cache preflight por 24 horas
 }));
+
+// Tratar explicitamente preflight OPTIONS
+app.options('*', cors());
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Middleware de CORS explícito (fallback)
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && allowedOrigins.includes(origin)) {
+  if (origin && isOriginAllowed(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   }
   
   // Handle preflight
@@ -141,7 +169,12 @@ const PORT = process.env.PORT || 3001;
 server.listen(PORT, async () => {
   logger.info(`🚀 Servidor CharBotFlex rodando na porta ${PORT}`);
   logger.info(`📱 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
-  logger.info(`🌐 Origens CORS permitidas: ${allowedOrigins.join(', ')}`);
+  
+  // Mostrar origens CORS permitidas
+  const originsDisplay = allowedOrigins.map(o => 
+    typeof o === 'string' ? o : o.toString()
+  ).join(', ');
+  logger.info(`🌐 Origens CORS permitidas: ${originsDisplay}`);
   
   // Inicializar serviços
   await initializeServices();

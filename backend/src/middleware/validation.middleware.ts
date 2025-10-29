@@ -76,13 +76,21 @@ export const schemas = {
     email: z.string().email('Email inválido'),
     password: z.string().min(6, 'Senha deve ter pelo menos 6 caracteres'),
     role: z.enum(['admin', 'supervisor', 'operator']),
-    phone: z.string().min(10, 'Telefone inválido').max(15),
+    phone: z.string()
+      .min(8, 'Telefone muito curto')
+      .max(20, 'Telefone muito longo')
+      .regex(/^[\d\s\-\+\(\)]+$/, 'Telefone contém caracteres inválidos')
+      .optional(),
     maxChats: z.number().min(1).max(50).optional(),
   }),
 
   updateUser: z.object({
     name: z.string().min(3).max(100).optional(),
-    phone: z.string().min(10).max(15).optional(),
+    phone: z.string()
+      .min(8, 'Telefone muito curto')
+      .max(20, 'Telefone muito longo')
+      .regex(/^[\d\s\-\+\(\)]+$/, 'Telefone contém caracteres inválidos')
+      .optional(),
     maxChats: z.number().min(1).max(50).optional(),
     role: z.enum(['admin', 'supervisor', 'operator']).optional(),
   }),
@@ -133,7 +141,10 @@ export const schemas = {
 
   // Scheduled Message
   scheduleMessage: z.object({
-    phoneNumber: z.string().min(10).max(15),
+    phoneNumber: z.string()
+      .min(8, 'Telefone muito curto')
+      .max(20, 'Telefone muito longo')
+      .regex(/^[\d\s\-\+\(\)]+$/, 'Telefone contém caracteres inválidos'),
     content: z.string().min(1).max(4096),
     scheduledFor: z.string().datetime('Data/hora inválida'),
     repeatConfig: z.object({

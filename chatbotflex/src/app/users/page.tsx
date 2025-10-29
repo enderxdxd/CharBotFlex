@@ -7,7 +7,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { auth, db } from '@/lib/firebase';
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { toast } from 'sonner';
-import { Plus, Users, Shield, UserCheck, Loader2, Mail, Phone, Crown, User } from 'lucide-react';
+import { Plus, Users, Shield, UserCheck, Loader2, Mail, Phone, Crown, User, Edit2, Save, X } from 'lucide-react';
 
 interface UserData {
   uid: string;
@@ -25,11 +25,14 @@ export default function UsersPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [users, setUsers] = useState<UserData[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editingRole, setEditingRole] = useState<'admin' | 'operator' | 'supervisor'>('operator');
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     password: '',
-    role: 'operator' as 'admin' | 'operator'
+    phone: '',
+    role: 'operator' as 'admin' | 'operator' | 'supervisor'
   });
 
   // Carregar usuários do Firestore
@@ -106,7 +109,7 @@ export default function UsersPage() {
           email: formData.email,
           password: formData.password,
           role: formData.role,
-          phone: '', // Campo obrigatório no backend
+          phone: formData.phone || undefined,
           maxChats: 5
         })
       });
@@ -126,6 +129,7 @@ export default function UsersPage() {
         name: '',
         email: '',
         password: '',
+        phone: '',
         role: 'operator'
       });
       setShowCreateForm(false);
@@ -256,14 +260,29 @@ export default function UsersPage() {
                     </label>
                     <select
                       value={formData.role}
-                      onChange={(e) => setFormData({...formData, role: e.target.value as 'admin' | 'operator'})}
+                      onChange={(e) => setFormData({...formData, role: e.target.value as 'admin' | 'operator' | 'supervisor'})}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                       disabled={isCreating}
                     >
                       <option value="operator">Operador</option>
+                      <option value="supervisor">Supervisor</option>
                       <option value="admin">Administrador</option>
                     </select>
                   </div>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Telefone (Opcional)
+                  </label>
+                  <input
+                    type="tel"
+                    value={formData.phone}
+                    onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    placeholder="+55 11 98765-4321"
+                    disabled={isCreating}
+                  />
                 </div>
                 
                 <div className="flex justify-end space-x-3 pt-4">
@@ -337,6 +356,11 @@ export default function UsersPage() {
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Telefone
                         </th>
+                        {isAdmin && (
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Ações
+                          </th>
+                        )}
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
@@ -393,6 +417,69 @@ export default function UsersPage() {
                               <span className="text-gray-400">-</span>
                             )}
                           </td>
+                          {isAdmin && (
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              {editingUserId === user.uid ? (
+                                <div className="flex items-center space-x-2">
+                                  <select
+                                    value={editingRole}
+                                    onChange={(e) => setEditingRole(e.target.value as 'admin' | 'operator' | 'supervisor')}
+                                    className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                  >
+                                    <option value="operator">Operador</option>
+                                    <option value="supervisor">Supervisor</option>
+                                    <option value="admin">Administrador</option>
+                                  </select>
+                                  <button
+                                    onClick={async () => {
+                                      try {
+                                        const currentUser = auth.currentUser;
+                                        if (!currentUser) return;
+                                        const token = await currentUser.getIdToken();
+                                        
+                                        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/users/${user.uid}`, {
+                                          method: 'PATCH',
+                                          headers: {
+                                            'Content-Type': 'application/json',
+                                            'Authorization': `Bearer ${token}`
+                                          },
+                                          body: JSON.stringify({ role: editingRole })
+                                        });
+                                        
+                                        if (!response.ok) throw new Error('Erro ao atualizar');
+                                        
+                                        toast.success('Função atualizada com sucesso');
+                                        await loadUsers();
+                                        setEditingUserId(null);
+                                      } catch (error) {
+                                        toast.error('Erro ao atualizar função');
+                                      }
+                                    }}
+                                    className="p-1 text-green-600 hover:text-green-700"
+                                  >
+                                    <Save className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => setEditingUserId(null)}
+                                    className="p-1 text-gray-600 hover:text-gray-700"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    setEditingUserId(user.uid);
+                                    setEditingRole(user.role);
+                                  }}
+                                  className="inline-flex items-center text-indigo-600 hover:text-indigo-700"
+                                >  
+                                  <Edit2 className="h-4 w-4 mr-1" />
+                                  Editar
+                                </button>
+                              )}
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
