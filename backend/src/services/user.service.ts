@@ -72,7 +72,7 @@ export class UserService {
     password: string;
     name: string;
     role: UserRole;
-    phone: string;
+    phone?: string;
     maxChats?: number;
     permissions?: any;
   }): Promise<IUser> {
@@ -85,11 +85,10 @@ export class UserService {
       });
 
       // Criar documento no Firestore
-      const user: Omit<IUser, 'uid'> = {
+      const user: any = {
         email: userData.email,
         name: userData.name,
         role: userData.role,
-        phone: userData.phone,
         status: 'offline',
         maxChats: userData.maxChats || 5,
         currentChats: 0,
@@ -103,6 +102,11 @@ export class UserService {
         createdAt: new Date(),
         updatedAt: new Date(),
       };
+
+      // Adicionar phone apenas se fornecido
+      if (userData.phone) {
+        user.phone = userData.phone;
+      }
 
       await db.collection(collections.users).doc(userRecord.uid).set(user);
 
@@ -120,10 +124,18 @@ export class UserService {
 
   async updateUser(uid: string, updates: Partial<IUser>): Promise<IUser> {
     try {
-      const updateData = {
-        ...updates,
+      // Remover campos undefined
+      const updateData: any = {
         updatedAt: new Date(),
       };
+
+      // Adicionar apenas campos definidos
+      Object.keys(updates).forEach(key => {
+        const value = (updates as any)[key];
+        if (value !== undefined) {
+          updateData[key] = value;
+        }
+      });
 
       await db.collection(collections.users).doc(uid).update(updateData);
 
