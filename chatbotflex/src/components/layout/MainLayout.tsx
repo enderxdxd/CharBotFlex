@@ -15,7 +15,8 @@ import {
   Menu,
   X,
   Smartphone,
-  Building2
+  Building2,
+  UserCircle
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -28,6 +29,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, show: true },
     { name: 'Conversas', href: '/chats', icon: MessageCircle, show: true },
+    { name: 'Meu Perfil', href: '/profile', icon: UserCircle, show: true },
     { name: 'WhatsApp', href: '/whatsapp', icon: Smartphone, show: isAdmin },
     { name: 'Departamentos', href: '/departments', icon: Building2, show: isAdmin },
     { name: 'Usuários', href: '/users', icon: Users, show: isAdmin },
