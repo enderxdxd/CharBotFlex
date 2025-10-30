@@ -20,6 +20,11 @@ export class BaileysService extends EventEmitter {
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 5;
   private reconnectDelay: number = 5000; // 5 segundos
+  
+  // 🔒 CORREÇÃO 1: Prevenir múltiplas inicializações simultâneas
+  private isInitializing: boolean = false;
+  private reconnectTimeout: NodeJS.Timeout | null = null;
+  private qrTimeout: NodeJS.Timeout | null = null;
 
   constructor() {
     super();
@@ -27,8 +32,36 @@ export class BaileysService extends EventEmitter {
   }
 
   async initialize() {
+    // 🔒 CORREÇÃO 2: Prevenir inicialização concorrente
+    if (this.isInitializing) {
+      logger.warn('⚠️  Inicialização já em andamento, ignorando...');
+      return;
+    }
+
+    // Limpar timeout de reconexão anterior se existir
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+
+    this.isInitializing = true;
+
     try {
       logger.info('🔄 Inicializando Baileys...');
+      
+      // 🔒 CORREÇÃO 3: Desconectar socket anterior antes de criar novo
+      if (this.sock) {
+        try {
+          this.sock.ev.removeAllListeners('connection.update');
+          this.sock.ev.removeAllListeners('creds.update');
+          this.sock.ev.removeAllListeners('messages.upsert');
+          this.sock.end(undefined);
+          this.sock = null;
+          logger.info('Socket anterior encerrado');
+        } catch (error) {
+          logger.error('Erro ao encerrar socket anterior:', error);
+        }
+      }
       
       const { state, saveCreds } = await useMultiFileAuthState(
         path.join(this.sessionPath, 'session')
@@ -41,9 +74,16 @@ export class BaileysService extends EventEmitter {
         auth: state,
         printQRInTerminal: true,
         version,
-        defaultQueryTimeoutMs: undefined,
+        defaultQueryTimeoutMs: 60000, // 🔧 CORREÇÃO 4: Aumentar timeout
         connectTimeoutMs: 60000, // 60 segundos para conectar
         keepAliveIntervalMs: 30000, // Keep alive a cada 30s
+        // 🔧 CORREÇÃO 5: Adicionar configurações de estabilidade
+        retryRequestDelayMs: 250,
+        maxMsgRetryCount: 5,
+        getMessage: async () => undefined,
+        markOnlineOnConnect: true,
+        syncFullHistory: false,
+        browser: ['ChatBotFlex', 'Chrome', '1.0.0'],
       });
 
       // Event: Atualização de conexão
@@ -62,6 +102,9 @@ export class BaileysService extends EventEmitter {
 
           logger.info(`Conexão fechada. Status: ${statusCode}, Reconectar: ${shouldReconnect}`);
 
+          // 🔒 CORREÇÃO 6: Marcar inicialização como concluída
+          this.isInitializing = false;
+
           // Se foi logout manual, resetar contador
           if (statusCode === DisconnectReason.loggedOut) {
             this.reconnectAttempts = 0;
@@ -70,17 +113,34 @@ export class BaileysService extends EventEmitter {
             return;
           }
 
+          // 🔧 CORREÇÃO 7: Verificar razões específicas de desconexão
+          if (statusCode === 401) {
+            logger.error('❌ Sessão inválida. Necessário escanear QR Code novamente.');
+            this.isConnected = false;
+            this.emit('disconnected');
+            return;
+          }
+
           if (shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
-            logger.warn(`⚠️  Tentativa de reconexão ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
             
-            setTimeout(async () => {
+            // 🔧 CORREÇÃO 8: Backoff exponencial
+            const delay = Math.min(
+              this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1),
+              30000 // máximo 30s
+            );
+            
+            logger.warn(`⚠️  Tentativa de reconexão ${this.reconnectAttempts}/${this.maxReconnectAttempts} em ${delay}ms`);
+            
+            // 🔒 Armazenar timeout para poder cancelar
+            this.reconnectTimeout = setTimeout(async () => {
               await this.initialize();
-            }, this.reconnectDelay);
+            }, delay);
           } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
             logger.error('❌ Limite de tentativas de reconexão atingido. WhatsApp desconectado.');
             logger.info('💡 Para reconectar, acesse a página de WhatsApp e escaneie o QR Code.');
             this.isConnected = false;
+            this.reconnectAttempts = 0; // 🔧 CORREÇÃO 9: Reset para próxima tentativa manual
             this.emit('disconnected');
           } else {
             this.isConnected = false;
@@ -90,8 +150,11 @@ export class BaileysService extends EventEmitter {
           this.isConnected = true;
           this.qrCode = null;
           this.reconnectAttempts = 0; // Reset contador ao conectar
+          this.isInitializing = false; // 🔒 Inicialização concluída com sucesso
           logger.info('✅ Baileys conectado com sucesso!');
           this.emit('connected');
+        } else if (connection === 'connecting') {
+          logger.info('🔄 Conectando ao WhatsApp...');
         }
       });
 
@@ -119,7 +182,18 @@ export class BaileysService extends EventEmitter {
           this.emit('messageUpdate', update);
         }
       });
+
+      // 🔒 CORREÇÃO 10: Marcar inicialização como concluída após setup
+      // Apenas se a conexão não foi estabelecida imediatamente
+      setTimeout(() => {
+        if (!this.isConnected && this.isInitializing) {
+          this.isInitializing = false;
+          logger.info('⏱️  Timeout de inicialização, marcando como concluída');
+        }
+      }, 10000); // 10 segundos
+
     } catch (error) {
+      this.isInitializing = false; // 🔒 Liberar flag em caso de erro
       logger.error('Erro ao inicializar Baileys:', error);
       throw error;
     }
@@ -271,23 +345,55 @@ export class BaileysService extends EventEmitter {
   }
 
   async disconnect() {
+    // 🔒 CORREÇÃO 11: Limpar timeouts ao desconectar
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+    if (this.qrTimeout) {
+      clearTimeout(this.qrTimeout);
+      this.qrTimeout = null;
+    }
+
     if (this.sock) {
-      await this.sock.logout();
+      try {
+        this.sock.ev.removeAllListeners('connection.update');
+        this.sock.ev.removeAllListeners('creds.update');
+        this.sock.ev.removeAllListeners('messages.upsert');
+        await this.sock.logout();
+      } catch (error) {
+        logger.error('Erro ao fazer logout:', error);
+      }
       this.sock = null;
       this.isConnected = false;
       this.qrCode = null;
+      this.isInitializing = false;
       logger.info('Baileys desconectado');
     }
   }
 
   async forceNewQR() {
+    // 🔒 CORREÇÃO 12: Prevenir múltiplas chamadas simultâneas
+    if (this.isInitializing) {
+      throw new Error('Já existe uma inicialização em andamento');
+    }
+
+    // Limpar timeout anterior se existir
+    if (this.qrTimeout) {
+      clearTimeout(this.qrTimeout);
+      this.qrTimeout = null;
+    }
+
     // Resetar contador de reconexão
     this.reconnectAttempts = 0;
     
     // Desconectar sessão atual se existir
     if (this.sock) {
       try {
-        await this.sock.logout();
+        this.sock.ev.removeAllListeners('connection.update');
+        this.sock.ev.removeAllListeners('creds.update');
+        this.sock.ev.removeAllListeners('messages.upsert');
+        await this.sock.end(undefined);
         this.sock = null;
         this.isConnected = false;
         this.qrCode = null;
@@ -308,16 +414,42 @@ export class BaileysService extends EventEmitter {
     // Reinicializar para gerar novo QR Code
     await this.initialize();
     
-    // Aguardar QR Code ser gerado
+    // 🔧 CORREÇÃO 13: Aumentar timeout para 60 segundos
     return new Promise<string>((resolve, reject) => {
-      const timeout = setTimeout(() => {
+      this.qrTimeout = setTimeout(() => {
+        this.qrTimeout = null;
         reject(new Error('Timeout ao gerar QR Code'));
-      }, 30000); // 30 segundos
+      }, 60000); // 60 segundos
 
       this.once('qr', (qr) => {
-        clearTimeout(timeout);
+        if (this.qrTimeout) {
+          clearTimeout(this.qrTimeout);
+          this.qrTimeout = null;
+        }
         resolve(qr);
       });
+
+      // 🔧 CORREÇÃO 14: Também resolver se desconectar (erro)
+      this.once('disconnected', () => {
+        if (this.qrTimeout) {
+          clearTimeout(this.qrTimeout);
+          this.qrTimeout = null;
+        }
+        reject(new Error('Desconectado antes de gerar QR Code'));
+      });
     });
+  }
+
+  // 🔧 CORREÇÃO 15: Método para limpar recursos
+  cleanup() {
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+    if (this.qrTimeout) {
+      clearTimeout(this.qrTimeout);
+      this.qrTimeout = null;
+    }
+    this.removeAllListeners();
   }
 }
