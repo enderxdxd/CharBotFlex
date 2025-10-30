@@ -28,17 +28,22 @@ export class BaileysService extends EventEmitter {
 
   async initialize() {
     try {
+      logger.info('🔄 Inicializando Baileys...');
+      
       const { state, saveCreds } = await useMultiFileAuthState(
         path.join(this.sessionPath, 'session')
       );
 
       const { version } = await fetchLatestBaileysVersion();
+      logger.info(`📦 Versão do Baileys: ${version.join('.')}`);
 
       this.sock = makeWASocket({
         auth: state,
         printQRInTerminal: true,
         version,
         defaultQueryTimeoutMs: undefined,
+        connectTimeoutMs: 60000, // 60 segundos para conectar
+        keepAliveIntervalMs: 30000, // Keep alive a cada 30s
       });
 
       // Event: Atualização de conexão
@@ -52,11 +57,18 @@ export class BaileysService extends EventEmitter {
         }
 
         if (connection === 'close') {
-          const shouldReconnect =
-            (lastDisconnect?.error as Boom)?.output?.statusCode !==
-            DisconnectReason.loggedOut;
+          const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+          const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
-          logger.info('Conexão fechada. Reconectar:', shouldReconnect);
+          logger.info(`Conexão fechada. Status: ${statusCode}, Reconectar: ${shouldReconnect}`);
+
+          // Se foi logout manual, resetar contador
+          if (statusCode === DisconnectReason.loggedOut) {
+            this.reconnectAttempts = 0;
+            this.isConnected = false;
+            this.emit('disconnected');
+            return;
+          }
 
           if (shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
@@ -269,6 +281,9 @@ export class BaileysService extends EventEmitter {
   }
 
   async forceNewQR() {
+    // Resetar contador de reconexão
+    this.reconnectAttempts = 0;
+    
     // Desconectar sessão atual se existir
     if (this.sock) {
       try {
@@ -297,7 +312,7 @@ export class BaileysService extends EventEmitter {
     return new Promise<string>((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error('Timeout ao gerar QR Code'));
-      }, 10000); // 10 segundos
+      }, 30000); // 30 segundos
 
       this.once('qr', (qr) => {
         clearTimeout(timeout);
