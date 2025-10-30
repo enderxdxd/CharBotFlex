@@ -11,6 +11,13 @@ import QRCode from 'qrcode';
 import path from 'path';
 import logger from '../../utils/logger';
 import { EventEmitter } from 'events';
+import crypto from 'crypto';
+
+// 🔒 CORREÇÃO CRÍTICA: Garantir que crypto está disponível globalmente
+if (typeof global.crypto === 'undefined') {
+  (global as any).crypto = crypto.webcrypto || crypto;
+  logger.info('✅ Polyfill de crypto aplicado globalmente');
+}
 
 export class BaileysService extends EventEmitter {
   private sock: WASocket | null = null;

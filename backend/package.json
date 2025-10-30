@@ -3,12 +3,18 @@
   "version": "1.0.0",
   "description": "Backend do CharBotFlex - Sistema de atendimento WhatsApp",
   "main": "dist/server.js",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "lint": "eslint src/**/*.ts",
-    "check-deploy": "node scripts/check-deploy-ready.js"
+    "check-deploy": "node scripts/check-deploy-ready.js",
+    "check-node": "node scripts/check-node-version.js",
+    "prestart": "node scripts/check-node-version.js"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",
