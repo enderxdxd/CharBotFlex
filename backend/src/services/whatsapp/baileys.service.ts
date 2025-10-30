@@ -23,18 +23,27 @@ export class BaileysService extends EventEmitter {
   
   // 🔒 CORREÇÃO 1: Prevenir múltiplas inicializações simultâneas
   private isInitializing: boolean = false;
+  private reconnecting: boolean = false;
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private qrTimeout: NodeJS.Timeout | null = null;
 
   constructor() {
     super();
-    this.sessionPath = process.env.BAILEYS_SESSION_PATH || './baileys_sessions';
+    this.sessionPath = process.env.BAILEYS_SESSION_PATH || '/data/baileys_sessions';
+    logger.info(`📁 Session path: ${this.sessionPath}`);
   }
 
   async initialize() {
     // 🔒 CORREÇÃO 2: Prevenir inicialização concorrente
     if (this.isInitializing) {
       logger.warn('⚠️  Inicialização já em andamento, ignorando...');
+      return;
+    }
+
+    // 🔒 Verificar se socket já está conectado
+    if (this.isConnected && this.sock) {
+      logger.info('✅ Socket já conectado; abortando nova init.');
+      this.isInitializing = false;
       return;
     }
 
@@ -97,10 +106,21 @@ export class BaileysService extends EventEmitter {
         }
 
         if (connection === 'close') {
-          const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+          const err = lastDisconnect?.error as any;
+          const statusCode = err?.output?.statusCode;
           const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
-          logger.info(`Conexão fechada. Status: ${statusCode}, Reconectar: ${shouldReconnect}`);
+          // Log completo do erro para debug
+          logger.error('🔴 Conexão fechada - Detalhes:', {
+            statusCode,
+            message: err?.message,
+            name: err?.name,
+            code: err?.code,
+            data: err?.data,
+            shouldReconnect,
+            reconnectAttempts: this.reconnectAttempts,
+            maxAttempts: this.maxReconnectAttempts
+          });
 
           // 🔒 CORREÇÃO 6: Marcar inicialização como concluída
           this.isInitializing = false;
@@ -122,6 +142,13 @@ export class BaileysService extends EventEmitter {
           }
 
           if (shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
+            // 🔒 Prevenir múltiplas reconexões simultâneas
+            if (this.reconnecting) {
+              logger.warn('⚠️  Reconexão já em andamento, ignorando...');
+              return;
+            }
+            
+            this.reconnecting = true;
             this.reconnectAttempts++;
             
             // 🔧 CORREÇÃO 8: Backoff exponencial
@@ -134,7 +161,11 @@ export class BaileysService extends EventEmitter {
             
             // 🔒 Armazenar timeout para poder cancelar
             this.reconnectTimeout = setTimeout(async () => {
-              await this.initialize();
+              try {
+                await this.initialize();
+              } finally {
+                this.reconnecting = false;
+              }
             }, delay);
           } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
             logger.error('❌ Limite de tentativas de reconexão atingido. WhatsApp desconectado.');

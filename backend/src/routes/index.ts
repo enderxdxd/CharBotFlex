@@ -73,6 +73,7 @@ router.patch('/users/me/password', userController.updateOwnPassword as any);
 // ==========================================
 // ROTAS DO WHATSAPP
 // ==========================================
+router.get('/whatsapp/health', whatsappController.getHealth as any);
 router.get('/whatsapp/connections', whatsappController.getConnections as any);
 router.post('/whatsapp/generate-qr', whatsappController.generateQrCode as any);
 router.post('/whatsapp/disconnect/:id', whatsappController.disconnectWhatsApp as any);

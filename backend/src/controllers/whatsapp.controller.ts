@@ -4,6 +4,32 @@ import { getWhatsAppManager } from '../services/whatsapp/whatsapp.manager';
 import { db, collections } from '../config/firebase';
 import logger from '../utils/logger';
 
+export const getHealth = async (req: AuthRequest, res: Response) => {
+  try {
+    const manager = getWhatsAppManager();
+    const baileysService = (manager as any).baileysService;
+    
+    res.json({
+      success: true,
+      data: {
+        ready: manager.getConnectionStatus(),
+        provider: manager.getCurrentProvider(),
+        hasSocket: !!baileysService?.sock,
+        reconnectAttempts: baileysService?.reconnectAttempts || 0,
+        maxReconnectAttempts: baileysService?.maxReconnectAttempts || 5,
+        isInitializing: baileysService?.isInitializing || false,
+        reconnecting: baileysService?.reconnecting || false,
+      }
+    });
+  } catch (error) {
+    logger.error('Erro ao buscar health:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao buscar status do WhatsApp',
+    });
+  }
+};
+
 export const getConnections = async (req: AuthRequest, res: Response) => {
   try {
     const manager = getWhatsAppManager();

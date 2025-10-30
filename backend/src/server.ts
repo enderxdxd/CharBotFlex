@@ -25,6 +25,11 @@ const app = express();
 const server = createServer(app);
 
 // ========================================
+// CONFIGURAÇÃO DE PROXY (Railway/Produção)
+// ========================================
+app.set('trust proxy', 1); // Atrás de proxy (Railway)
+
+// ========================================
 // CONFIGURAÇÃO CORS MELHORADA
 // ========================================
 const allowedOrigins = [

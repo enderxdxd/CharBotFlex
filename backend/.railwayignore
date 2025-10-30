@@ -1,0 +1,40 @@
+# Arquivos e pastas a ignorar no Railway
+
+# Dependências
+node_modules/
+
+# Ambiente local
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Build local
+dist/
+
+# Sessões locais (usar volume /data)
+baileys_sessions/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Documentação
+*.md
+!README.md
+
+# Testes
+coverage/
+.nyc_output/
