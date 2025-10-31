@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { AuthRequest } from '../types.js';
+import { AuthRequest } from '../types/index.js';
 import { QuickReplyService } from '../services/quick-reply.service.js';
 import logger from '../utils/logger.js';
 import { ForbiddenError } from '../utils/AppError.js';

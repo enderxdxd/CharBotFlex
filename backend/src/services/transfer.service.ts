@@ -1,5 +1,5 @@
 import { db, collections } from '../config/firebase.js';
-import { ITransfer } from '../types.js';
+import { ITransfer } from '../types/index.js';
 import { generateId } from '../utils/helpers.js';
 import logger from '../utils/logger.js';
 

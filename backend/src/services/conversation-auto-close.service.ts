@@ -1,5 +1,5 @@
 import { db } from '../config/firebase.js';
-import { IConversation } from '../types.js';
+import { IConversation } from '../types/index.js';
 import { SettingsService } from './settings.service.js';
 import logger from '../utils/logger.js';
 

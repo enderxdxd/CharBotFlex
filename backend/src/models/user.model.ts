@@ -1,4 +1,4 @@
-import { IUser, UserRole, UserStatus, IPermissions } from '../types.js';
+import { IUser, UserRole, UserStatus, IPermissions } from '../types/index.js';
 
 export class User implements IUser {
   uid: string;

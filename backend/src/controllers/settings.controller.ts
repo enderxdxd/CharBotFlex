@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { AuthRequest } from '../types.js';
+import { AuthRequest } from '../types/index.js';
 import { SettingsService } from '../services/settings.service.js';
 import { runManualCheck } from '../jobs/conversation-auto-close.job.js';
 import logger from '../utils/logger.js';

@@ -1,4 +1,4 @@
-import { IBotFlow, ITrigger, IFlowNode } from '../types.js';
+import { IBotFlow, ITrigger, IFlowNode } from '../types/index.js';
 
 export class BotFlow implements IBotFlow {
   id: string;

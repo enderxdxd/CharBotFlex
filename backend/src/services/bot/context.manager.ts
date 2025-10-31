@@ -1,5 +1,5 @@
 import { db, collections } from '../../config/firebase.js';
-import { IConversationContext } from '../../types.js';
+import { IConversationContext } from '../../types/index.js';
 import logger from '../../utils/logger.js';
 
 export class ContextManager {

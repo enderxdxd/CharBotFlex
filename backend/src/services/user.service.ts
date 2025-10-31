@@ -1,5 +1,5 @@
 import { auth, db, collections } from '../config/firebase.js';
-import { IUser, UserRole, UserStatus } from '../types.js';
+import { IUser, UserRole, UserStatus } from '../types/index.js';
 import logger from '../utils/logger.js';
 
 export class UserService {

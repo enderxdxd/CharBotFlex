@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { AuthRequest } from '../types.js';
+import { AuthRequest } from '../types/index.js';
 import { FeedbackService } from '../services/feedback.service.js';
 import { db, collections } from '../config/firebase.js';
 import logger from '../utils/logger.js';

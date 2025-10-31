@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { AuthRequest } from '../types.js';
+import { AuthRequest } from '../types/index.js';
 import { DepartmentService } from '../services/department.service.js';
 import logger from '../utils/logger.js';
 

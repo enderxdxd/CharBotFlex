@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { auth } from '../config/firebase.js';
 import { UserService } from '../services/user.service.js';
-import { AuthRequest } from '../types.js';
+import { AuthRequest } from '../types/index.js';
 import logger from '../utils/logger.js';
 
 const userService = new UserService();
