@@ -1,7 +1,7 @@
 import { Response } from 'express';
-import { AuthRequest } from '../types';
-import { ExportService } from '../services/export.service';
-import logger from '../utils/logger';
+import { AuthRequest } from '../types.js';
+import { ExportService } from '../services/export.service.js';
+import logger from '../utils/logger.js';
 
 const exportService = new ExportService();
 

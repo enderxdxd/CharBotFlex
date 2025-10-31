@@ -1,5 +1,5 @@
 import axios from 'axios';
-import logger from '../../utils/logger';
+import logger from '../../utils/logger.js';
 
 export class OfficialApiService {
   private accessToken: string;

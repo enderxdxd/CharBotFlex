@@ -1,5 +1,5 @@
-import { db } from '../config/firebase';
-import logger from '../utils/logger';
+import { db } from '../config/firebase.js';
+import logger from '../utils/logger.js';
 
 async function checkMessages() {
   logger.info('🔍 Verificando TODAS as mensagens no Firestore...\n');

@@ -1,8 +1,8 @@
 import { Response } from 'express';
-import { AuthRequest } from '../types';
-import { FeedbackService } from '../services/feedback.service';
-import { db, collections } from '../config/firebase';
-import logger from '../utils/logger';
+import { AuthRequest } from '../types.js';
+import { FeedbackService } from '../services/feedback.service.js';
+import { db, collections } from '../config/firebase.js';
+import logger from '../utils/logger.js';
 
 const feedbackService = new FeedbackService();
 

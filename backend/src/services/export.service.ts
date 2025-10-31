@@ -1,5 +1,5 @@
-import { db, collections } from '../config/firebase';
-import logger from '../utils/logger';
+import { db, collections } from '../config/firebase.js';
+import logger from '../utils/logger.js';
 
 export class ExportService {
   async exportConversations(filters: {

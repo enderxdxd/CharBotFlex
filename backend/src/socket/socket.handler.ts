@@ -1,8 +1,8 @@
 import { Server, Socket } from 'socket.io';
-import { UserService } from '../services/user.service';
+import { UserService } from '../services/user.service.js';
 // Importação inline para resolver problema de módulo
 const { TransferService } = require('../services/transfer.service');
-import logger from '../utils/logger';
+import logger from '../utils/logger.js';
 
 const userService = new UserService();
 const transferService = new TransferService();

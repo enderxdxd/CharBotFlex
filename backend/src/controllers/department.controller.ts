@@ -1,7 +1,7 @@
 import { Response } from 'express';
-import { AuthRequest } from '../types';
-import { DepartmentService } from '../services/department.service';
-import logger from '../utils/logger';
+import { AuthRequest } from '../types.js';
+import { DepartmentService } from '../services/department.service.js';
+import logger from '../utils/logger.js';
 
 const departmentService = new DepartmentService();
 

@@ -1,7 +1,7 @@
 import { Response } from 'express';
-import { AuthRequest } from '../types';
-import { auth } from '../config/firebase';
-import logger from '../utils/logger';
+import { AuthRequest } from '../types.js';
+import { auth } from '../config/firebase.js';
+import logger from '../utils/logger.js';
 
 // O backend não faz login/register - isso é feito no frontend
 // Aqui apenas validamos tokens e fornecemos informações do usuário

@@ -1,7 +1,7 @@
-import { db, collections } from '../config/firebase';
-import { IQuickReply, IQuickReplyInput } from '../models/quick-reply.model';
-import logger from '../utils/logger';
-import { NotFoundError, ConflictError } from '../utils/AppError';
+import { db, collections } from '../config/firebase.js';
+import { IQuickReply, IQuickReplyInput } from '../models/quick-reply.model.js';
+import logger from '../utils/logger.js';
+import { NotFoundError, ConflictError } from '../utils/AppError.js';
 
 export class QuickReplyService {
   async getAllQuickReplies(filters?: { 

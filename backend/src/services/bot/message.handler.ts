@@ -1,10 +1,10 @@
-import { db, collections } from '../../config/firebase';
-import { FlowEngine } from './flow.engine';
+import { db, collections } from '../../config/firebase.js';
+import { FlowEngine } from './flow.engine.js';
 // Importação inline para resolver problema de módulo
 const { ContextManager } = require('./context.manager');
-import { generateId } from '../../utils/helpers';
-import logger from '../../utils/logger';
-import { io } from '../../server';
+import { generateId } from '../../utils/helpers.js';
+import logger from '../../utils/logger.js';
+import { io } from '../../server.js';
 
 export class MessageHandler {
   private flowEngine: FlowEngine;

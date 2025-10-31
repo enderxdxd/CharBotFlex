@@ -1,6 +1,6 @@
-import { db, collections } from '../../config/firebase';
-import { IBotFlow, IFlowNode, IConversationContext } from '../../types';
-import logger from '../../utils/logger';
+import { db, collections } from '../../config/firebase.js';
+import { IBotFlow, IFlowNode, IConversationContext } from '../../types.js';
+import logger from '../../utils/logger.js';
 
 export class FlowEngine {
   async processMessage(

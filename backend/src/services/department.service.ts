@@ -1,7 +1,7 @@
-import { db, collections } from '../config/firebase';
-import { IDepartment, DistributionStrategy, UserDepartmentInfo } from '../types/department.types';
-import { generateId } from '../utils/helpers';
-import logger from '../utils/logger';
+import { db, collections } from '../config/firebase.js';
+import { IDepartment, DistributionStrategy, UserDepartmentInfo } from '../types/department.types.js';
+import { generateId } from '../utils/helpers.js';
+import logger from '../utils/logger.js';
 
 export class DepartmentService {
   async createDepartment(data: {

@@ -1,7 +1,7 @@
 import { Response } from 'express';
-import { AuthRequest } from '../types';
-import { UserService } from '../services/user.service';
-import logger from '../utils/logger';
+import { AuthRequest } from '../types.js';
+import { UserService } from '../services/user.service.js';
+import logger from '../utils/logger.js';
 
 const userService = new UserService();
 

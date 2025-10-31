@@ -1,8 +1,8 @@
 import { Response } from 'express';
-import { AuthRequest } from '../types';
-import { SettingsService } from '../services/settings.service';
-import { runManualCheck } from '../jobs/conversation-auto-close.job';
-import logger from '../utils/logger';
+import { AuthRequest } from '../types.js';
+import { SettingsService } from '../services/settings.service.js';
+import { runManualCheck } from '../jobs/conversation-auto-close.job.js';
+import logger from '../utils/logger.js';
 
 const settingsService = new SettingsService();
 

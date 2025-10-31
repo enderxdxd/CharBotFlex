@@ -1,24 +1,24 @@
 import { Router, Request, Response } from 'express';
-import { authenticate } from '../middleware/auth.middleware';
-import { apiLimiter, authLimiter, createLimiter } from '../middleware/rate-limit.middleware';
-import { validate } from '../middleware/validation.middleware';
-import { schemas } from '../middleware/validation.middleware';
+import { authenticate } from '../middleware/auth.middleware.js';
+import { apiLimiter, authLimiter, createLimiter } from '../middleware/rate-limit.middleware.js';
+import { validate } from '../middleware/validation.middleware.js';
+import { schemas } from '../middleware/validation.middleware.js';
 
 // Controllers
-import * as botController from '../controllers/bot.controller';
-import * as userController from '../controllers/user.controller';
-import * as authController from '../controllers/auth.controller';
-import * as whatsappController from '../controllers/whatsapp.controller';
-import * as departmentController from '../controllers/department.controller';
-import * as settingsController from '../controllers/settings.controller';
-import * as quickReplyController from '../controllers/quick-reply.controller';
-import * as tagController from '../controllers/tag.controller';
-import * as analyticsController from '../controllers/analytics.controller';
-import * as feedbackController from '../controllers/feedback.controller';
-import * as exportController from '../controllers/export.controller';
-import * as schedulerController from '../controllers/scheduler.controller';
-import * as conversationController from '../controllers/conversation.controller';
-import * as testController from '../controllers/test.controller';
+import * as botController from '../controllers/bot.controller.js';
+import * as userController from '../controllers/user.controller.js';
+import * as authController from '../controllers/auth.controller.js';
+import * as whatsappController from '../controllers/whatsapp.controller.js';
+import * as departmentController from '../controllers/department.controller.js';
+import * as settingsController from '../controllers/settings.controller.js';
+import * as quickReplyController from '../controllers/quick-reply.controller.js';
+import * as tagController from '../controllers/tag.controller.js';
+import * as analyticsController from '../controllers/analytics.controller.js';
+import * as feedbackController from '../controllers/feedback.controller.js';
+import * as exportController from '../controllers/export.controller.js';
+import * as schedulerController from '../controllers/scheduler.controller.js';
+import * as conversationController from '../controllers/conversation.controller.js';
+import * as testController from '../controllers/test.controller.js';
 
 const router = Router();
 

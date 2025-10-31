@@ -1,6 +1,6 @@
-import { db, collections } from '../config/firebase';
-import { IAnalytics, IOperatorPerformance, IConversationTrend } from '../models/analytics.model';
-import logger from '../utils/logger';
+import { db, collections } from '../config/firebase.js';
+import { IAnalytics, IOperatorPerformance, IConversationTrend } from '../models/analytics.model.js';
+import logger from '../utils/logger.js';
 
 export class AnalyticsService {
   async getAnalytics(filters: {

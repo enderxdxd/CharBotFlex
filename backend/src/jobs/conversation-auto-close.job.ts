@@ -1,6 +1,6 @@
 import cron from 'node-cron';
-import { ConversationAutoCloseService } from '../services/conversation-auto-close.service';
-import logger from '../utils/logger';
+import { ConversationAutoCloseService } from '../services/conversation-auto-close.service.js';
+import logger from '../utils/logger.js';
 
 const autoCloseService = new ConversationAutoCloseService();
 

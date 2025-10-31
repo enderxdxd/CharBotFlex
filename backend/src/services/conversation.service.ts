@@ -1,6 +1,6 @@
-import { db } from '../config/firebase';
-import { IConversation, IMessage, CreateMessageDTO, CloseConversationDTO } from '../types/conversation.types';
-import logger from '../utils/logger';
+import { db } from '../config/firebase.js';
+import { IConversation, IMessage, CreateMessageDTO, CloseConversationDTO } from '../types/conversation.types.js';
+import logger from '../utils/logger.js';
 
 const CONVERSATIONS_COLLECTION = 'conversations';
 const MESSAGES_COLLECTION = 'messages';

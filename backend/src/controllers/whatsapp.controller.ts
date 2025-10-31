@@ -1,8 +1,8 @@
 import { Response } from 'express';
-import { AuthRequest } from '../types';
-import { getWhatsAppManager } from '../services/whatsapp/whatsapp.manager';
-import { db, collections } from '../config/firebase';
-import logger from '../utils/logger';
+import { AuthRequest } from '../types.js';
+import { getWhatsAppManager } from '../services/whatsapp/whatsapp.manager.js';
+import { db, collections } from '../config/firebase.js';
+import logger from '../utils/logger.js';
 
 export const getHealth = async (req: AuthRequest, res: Response) => {
   try {

@@ -1,6 +1,6 @@
-import { auth, db, collections } from '../config/firebase';
-import { IUser, UserRole, UserStatus } from '../types';
-import logger from '../utils/logger';
+import { auth, db, collections } from '../config/firebase.js';
+import { IUser, UserRole, UserStatus } from '../types.js';
+import logger from '../utils/logger.js';
 
 export class UserService {
   async getAllUsers(filters?: { role?: string; status?: string }): Promise<IUser[]> {

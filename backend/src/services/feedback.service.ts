@@ -1,7 +1,7 @@
-import { db, collections } from '../config/firebase';
-import { IFeedback, IFeedbackInput, IFeedbackStats } from '../models/feedback.model';
-import logger from '../utils/logger';
-import { NotFoundError } from '../utils/AppError';
+import { db, collections } from '../config/firebase.js';
+import { IFeedback, IFeedbackInput, IFeedbackStats } from '../models/feedback.model.js';
+import logger from '../utils/logger.js';
+import { NotFoundError } from '../utils/AppError.js';
 
 export class FeedbackService {
   async getAllFeedback(filters?: {

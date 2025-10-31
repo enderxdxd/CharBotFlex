@@ -1,7 +1,7 @@
 import { Boom } from '@hapi/boom';
 import QRCode from 'qrcode';
 import path from 'path';
-import logger from '../../utils/logger';
+import logger from '../../utils/logger.js';
 import { EventEmitter } from 'events';
 import crypto from 'crypto';
 

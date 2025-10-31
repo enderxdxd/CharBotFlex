@@ -1,6 +1,6 @@
-import { db, collections } from '../../config/firebase';
-import { IConversationContext } from '../../types';
-import logger from '../../utils/logger';
+import { db, collections } from '../../config/firebase.js';
+import { IConversationContext } from '../../types.js';
+import logger from '../../utils/logger.js';
 
 export class ContextManager {
   async getContext(conversationId: string): Promise<IConversationContext> {

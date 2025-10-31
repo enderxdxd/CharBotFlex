@@ -1,8 +1,8 @@
 import { Response } from 'express';
-import { AuthRequest } from '../types';
-import { TagService } from '../services/tag.service';
-import logger from '../utils/logger';
-import { ForbiddenError } from '../utils/AppError';
+import { AuthRequest } from '../types.js';
+import { TagService } from '../services/tag.service.js';
+import logger from '../utils/logger.js';
+import { ForbiddenError } from '../utils/AppError.js';
 
 const tagService = new TagService();
 

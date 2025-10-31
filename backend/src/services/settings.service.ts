@@ -1,6 +1,6 @@
-import { db } from '../config/firebase';
-import { ISystemSettings, DEFAULT_MESSAGES } from '../types/settings.types';
-import logger from '../utils/logger';
+import { db } from '../config/firebase.js';
+import { ISystemSettings, DEFAULT_MESSAGES } from '../types/settings.types.js';
+import logger from '../utils/logger.js';
 
 const SETTINGS_COLLECTION = 'system_settings';
 const SETTINGS_DOC_ID = 'main';

@@ -3,12 +3,12 @@ import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import dotenv from 'dotenv';
-import routes from './routes';
-import { initSocketHandlers } from './socket/socket.handler';
-import { getWhatsAppManager } from './services/whatsapp/whatsapp.manager';
-import { startConversationAutoCloseJob } from './jobs/conversation-auto-close.job';
-import logger from './utils/logger';
-import { validateEnv } from './config/env.validator';
+import routes from './routes/index.js';
+import { initSocketHandlers } from './socket/socket.handler.js';
+import { getWhatsAppManager } from './services/whatsapp/whatsapp.manager.js';
+import { startConversationAutoCloseJob } from './jobs/conversation-auto-close.job.js';
+import logger from './utils/logger.js';
+import { validateEnv } from './config/env.validator.js';
 
 // Configurar variáveis de ambiente
 dotenv.config();

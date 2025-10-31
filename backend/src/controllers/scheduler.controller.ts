@@ -1,8 +1,8 @@
 import { Response } from 'express';
-import { AuthRequest } from '../types';
-import { SchedulerService } from '../services/scheduler.service';
-import { db, collections } from '../config/firebase';
-import logger from '../utils/logger';
+import { AuthRequest } from '../types.js';
+import { SchedulerService } from '../services/scheduler.service.js';
+import { db, collections } from '../config/firebase.js';
+import logger from '../utils/logger.js';
 
 const schedulerService = new SchedulerService();
 

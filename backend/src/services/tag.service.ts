@@ -1,7 +1,7 @@
-import { db, collections } from '../config/firebase';
-import { ITag, ITagInput } from '../models/tag.model';
-import logger from '../utils/logger';
-import { NotFoundError, ConflictError } from '../utils/AppError';
+import { db, collections } from '../config/firebase.js';
+import { ITag, ITagInput } from '../models/tag.model.js';
+import logger from '../utils/logger.js';
+import { NotFoundError, ConflictError } from '../utils/AppError.js';
 
 export class TagService {
   async getAllTags(filters?: { category?: string }): Promise<ITag[]> {

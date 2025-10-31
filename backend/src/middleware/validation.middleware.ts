@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { z, ZodSchema } from 'zod';
-import { ValidationError } from '../utils/AppError';
+import { ValidationError } from '../utils/AppError.js';
 
 // Middleware genérico de validação
 export const validate = (schema: ZodSchema) => {

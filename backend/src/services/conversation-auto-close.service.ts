@@ -1,7 +1,7 @@
-import { db } from '../config/firebase';
-import { IConversation } from '../types';
-import { SettingsService } from './settings.service';
-import logger from '../utils/logger';
+import { db } from '../config/firebase.js';
+import { IConversation } from '../types.js';
+import { SettingsService } from './settings.service.js';
+import logger from '../utils/logger.js';
 
 const CONVERSATIONS_COLLECTION = 'conversations';
 const WARNING_SENT_FIELD = 'autoCloseWarningSent';

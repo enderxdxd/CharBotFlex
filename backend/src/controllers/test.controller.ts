@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
-import { db } from '../config/firebase';
-import logger from '../utils/logger';
+import { db } from '../config/firebase.js';
+import logger from '../utils/logger.js';
 
 /**
  * Criar conversa de teste

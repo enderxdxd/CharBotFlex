@@ -1,9 +1,9 @@
 import { Response } from 'express';
-import { AuthRequest } from '../types';
-import { db, collections } from '../config/firebase';
-import { generateId } from '../utils/helpers';
-import logger from '../utils/logger';
-import { getWhatsAppManager } from '../services/whatsapp/whatsapp.manager';
+import { AuthRequest } from '../types.js';
+import { db, collections } from '../config/firebase.js';
+import { generateId } from '../utils/helpers.js';
+import logger from '../utils/logger.js';
+import { getWhatsAppManager } from '../services/whatsapp/whatsapp.manager.js';
 
 const whatsappManager = getWhatsAppManager();
 

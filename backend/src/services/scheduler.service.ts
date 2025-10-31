@@ -1,7 +1,7 @@
-import { db, collections } from '../config/firebase';
-import { IScheduledMessage, IScheduledMessageInput } from '../models/scheduled-message.model';
-import logger from '../utils/logger';
-import { NotFoundError } from '../utils/AppError';
+import { db, collections } from '../config/firebase.js';
+import { IScheduledMessage, IScheduledMessageInput } from '../models/scheduled-message.model.js';
+import logger from '../utils/logger.js';
+import { NotFoundError } from '../utils/AppError.js';
 // import cron from 'node-cron'; // Descomentar após instalar
 
 export class SchedulerService {

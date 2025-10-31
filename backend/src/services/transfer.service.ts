@@ -1,7 +1,7 @@
-import { db, collections } from '../config/firebase';
-import { ITransfer } from '../types';
-import { generateId } from '../utils/helpers';
-import logger from '../utils/logger';
+import { db, collections } from '../config/firebase.js';
+import { ITransfer } from '../types.js';
+import { generateId } from '../utils/helpers.js';
+import logger from '../utils/logger.js';
 
 export class TransferService {
   async createTransfer(data: {

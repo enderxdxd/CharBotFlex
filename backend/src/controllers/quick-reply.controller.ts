@@ -1,8 +1,8 @@
 import { Response } from 'express';
-import { AuthRequest } from '../types';
-import { QuickReplyService } from '../services/quick-reply.service';
-import logger from '../utils/logger';
-import { ForbiddenError } from '../utils/AppError';
+import { AuthRequest } from '../types.js';
+import { QuickReplyService } from '../services/quick-reply.service.js';
+import logger from '../utils/logger.js';
+import { ForbiddenError } from '../utils/AppError.js';
 
 const quickReplyService = new QuickReplyService();
 

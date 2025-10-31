@@ -1,7 +1,7 @@
-import { BaileysService } from './baileys.service';
-import { OfficialApiService } from './official-api.service';
-import { MessageHandler } from '../bot/message.handler';
-import logger from '../../utils/logger';
+import { BaileysService } from './baileys.service.js';
+import { OfficialApiService } from './official-api.service.js';
+import { MessageHandler } from '../bot/message.handler.js';
+import logger from '../../utils/logger.js';
 
 export class WhatsAppManager {
   private baileysService: BaileysService;

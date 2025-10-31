@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
-import { ConversationService } from '../services/conversation.service';
-import { AppError } from '../utils/AppError';
-import logger from '../utils/logger';
+import { ConversationService } from '../services/conversation.service.js';
+import { AppError } from '../utils/AppError.js';
+import logger from '../utils/logger.js';
 
 const conversationService = new ConversationService();
 
