@@ -1,7 +1,6 @@
 import { db, collections } from '../../config/firebase.js';
 import { FlowEngine } from './flow.engine.js';
-// Importação inline para resolver problema de módulo
-const { ContextManager } = require('./context.manager');
+import { ContextManager } from './context.manager.js';
 import { generateId } from '../../utils/helpers.js';
 import logger from '../../utils/logger.js';
 import { io } from '../../server.js';

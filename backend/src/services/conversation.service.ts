@@ -186,7 +186,7 @@ export class ConversationService {
       
       // IMPORTANTE: Enviar mensagem para o WhatsApp
       try {
-        const { getWhatsAppManager } = require('./whatsapp/whatsapp.manager');
+        const { getWhatsAppManager } = await import('./whatsapp/whatsapp.manager.js');
         const whatsappManager = getWhatsAppManager();
         
         if (conversation.phoneNumber) {

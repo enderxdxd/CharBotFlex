@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { auth } from '../config/firebase.js';
+import { auth, db, collections } from '../config/firebase.js';
 import { UserService } from '../services/user.service.js';
 import { AuthRequest } from '../types/index.js';
 import logger from '../utils/logger.js';
@@ -145,7 +145,6 @@ export const authenticate = async (
         };
         
         // Salvar diretamente no Firestore
-        const { db, collections } = require('../config/firebase');
         await db.collection(collections.users).doc(decodedToken.uid).set(newUser);
         
         logger.info(`✅ Usuário criado automaticamente: ${newUser.email}`);

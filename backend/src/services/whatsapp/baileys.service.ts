@@ -1,6 +1,7 @@
 import { Boom } from '@hapi/boom';
 import QRCode from 'qrcode';
 import path from 'path';
+import fs from 'fs';
 import logger from '../../utils/logger.js';
 import { EventEmitter } from 'events';
 import crypto from 'crypto';
@@ -447,7 +448,6 @@ export class BaileysService extends EventEmitter {
     }
 
     // Limpar sessão salva
-    const fs = require('fs');
     const sessionDir = path.join(this.sessionPath, 'session');
     if (fs.existsSync(sessionDir)) {
       fs.rmSync(sessionDir, { recursive: true, force: true });

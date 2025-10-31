@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../types/index.js';
 import { DepartmentService } from '../services/department.service.js';
+import { db, collections } from '../config/firebase.js';
 import logger from '../utils/logger.js';
 
 const departmentService = new DepartmentService();
@@ -205,7 +206,6 @@ export const transferToDepartment = async (req: AuthRequest, res: Response) => {
     }
     
     // Atualizar conversa com novo atendente
-    const { db, collections } = require('../config/firebase');
     await db.collection(collections.conversations).doc(conversationId).update({
       assignedTo: selectedUserId,
       status: 'human',
