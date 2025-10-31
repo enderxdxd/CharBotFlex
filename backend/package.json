@@ -2,14 +2,15 @@
   "name": "charbotflex-backend",
   "version": "1.0.0",
   "description": "Backend do CharBotFlex - Sistema de atendimento WhatsApp",
+  "type": "module",
   "main": "dist/server.js",
   "engines": {
     "node": ">=18.0.0",
     "npm": ">=9.0.0"
   },
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "build": "tsc",
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc && node scripts/add-js-extensions.js",
     "start": "node dist/server.js",
     "lint": "eslint src/**/*.ts",
     "check-deploy": "node scripts/check-deploy-ready.js",
@@ -45,7 +46,8 @@
     "@typescript-eslint/eslint-plugin": "^7.2.0",
     "@typescript-eslint/parser": "^7.2.0",
     "eslint": "^8.57.0",
-    "ts-node-dev": "^2.0.0",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.7.0",
     "typescript": "^5.3.3"
   }
 }

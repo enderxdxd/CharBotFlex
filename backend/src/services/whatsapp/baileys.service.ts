@@ -1,11 +1,3 @@
-import makeWASocket, {
-  DisconnectReason,
-  useMultiFileAuthState,
-  WASocket,
-  proto,
-  downloadMediaMessage,
-  fetchLatestBaileysVersion,
-} from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import QRCode from 'qrcode';
 import path from 'path';
@@ -19,8 +11,14 @@ if (typeof global.crypto === 'undefined') {
   logger.info('✅ Polyfill de crypto aplicado globalmente');
 }
 
+// Dynamic import types for Baileys
+type BaileysModule = typeof import('@whiskeysockets/baileys');
+type WASocket = import('@whiskeysockets/baileys').WASocket;
+type proto = typeof import('@whiskeysockets/baileys').proto;
+
 export class BaileysService extends EventEmitter {
   private sock: WASocket | null = null;
+  private baileys: BaileysModule | null = null;
   private qrCode: string | null = null;
   private isConnected: boolean = false;
   private sessionPath: string;
@@ -65,6 +63,13 @@ export class BaileysService extends EventEmitter {
     try {
       logger.info('🔄 Inicializando Baileys...');
       
+      // 🔒 Dynamic import of Baileys (ESM module)
+      if (!this.baileys) {
+        logger.info('📦 Carregando módulo Baileys...');
+        this.baileys = await import('@whiskeysockets/baileys');
+        logger.info('✅ Módulo Baileys carregado');
+      }
+      
       // 🔒 CORREÇÃO 3: Desconectar socket anterior antes de criar novo
       if (this.sock) {
         try {
@@ -79,14 +84,14 @@ export class BaileysService extends EventEmitter {
         }
       }
       
-      const { state, saveCreds } = await useMultiFileAuthState(
+      const { state, saveCreds } = await this.baileys.useMultiFileAuthState(
         path.join(this.sessionPath, 'session')
       );
 
-      const { version } = await fetchLatestBaileysVersion();
+      const { version } = await this.baileys.fetchLatestBaileysVersion();
       logger.info(`📦 Versão do Baileys: ${version.join('.')}`);
 
-      this.sock = makeWASocket({
+      this.sock = this.baileys.default({
         auth: state,
         printQRInTerminal: true,
         version,
@@ -115,7 +120,7 @@ export class BaileysService extends EventEmitter {
         if (connection === 'close') {
           const err = lastDisconnect?.error as any;
           const statusCode = err?.output?.statusCode;
-          const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+          const shouldReconnect = statusCode !== this.baileys!.DisconnectReason.loggedOut;
 
           // Log completo do erro para debug
           logger.error('🔴 Conexão fechada - Detalhes:', {
@@ -133,7 +138,7 @@ export class BaileysService extends EventEmitter {
           this.isInitializing = false;
 
           // Se foi logout manual, resetar contador
-          if (statusCode === DisconnectReason.loggedOut) {
+          if (statusCode === this.baileys!.DisconnectReason.loggedOut) {
             this.reconnectAttempts = 0;
             this.isConnected = false;
             this.emit('disconnected');
@@ -237,7 +242,7 @@ export class BaileysService extends EventEmitter {
     }
   }
 
-  private extractMessageData(message: proto.IWebMessageInfo) {
+  private extractMessageData(message: import('@whiskeysockets/baileys').proto.IWebMessageInfo) {
     const remoteJid = message.key.remoteJid || '';
     const messageType = Object.keys(message.message || {})[0];
     
@@ -336,13 +341,13 @@ export class BaileysService extends EventEmitter {
     }
   }
 
-  async downloadMedia(message: proto.IWebMessageInfo) {
+  async downloadMedia(message: import('@whiskeysockets/baileys').proto.IWebMessageInfo) {
     if (!this.sock) {
       throw new Error('Baileys não está conectado');
     }
 
     try {
-      const buffer = await downloadMediaMessage(
+      const buffer = await this.baileys!.downloadMediaMessage(
         message,
         'buffer',
         {},
