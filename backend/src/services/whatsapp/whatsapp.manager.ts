@@ -2,17 +2,24 @@ import { BaileysService } from './baileys.service.js';
 import { OfficialApiService } from './official-api.service.js';
 import { MessageHandler } from '../bot/message.handler.js';
 import logger from '../../utils/logger.js';
+import type { Server } from 'socket.io';
 
 export class WhatsAppManager {
   private baileysService: BaileysService;
   private officialApiService: OfficialApiService;
   private messageHandler: MessageHandler;
   private currentProvider: 'baileys' | 'official' = 'baileys';
+  private io: Server | null = null;
 
   constructor() {
     this.baileysService = new BaileysService();
     this.officialApiService = new OfficialApiService();
     this.messageHandler = new MessageHandler(this);
+  }
+
+  setSocketIO(io: Server) {
+    this.io = io;
+    logger.info('✅ Socket.IO configurado no WhatsAppManager');
   }
 
   async initialize() {
@@ -30,9 +37,8 @@ export class WhatsAppManager {
       this.baileysService.on('connected', () => {
         logger.info('✅ Baileys conectado com sucesso');
         // Emitir evento via Socket.IO para notificar frontend
-        const io = require('../server.js').io;
-        if (io) {
-          io.emit('whatsapp:connected', { 
+        if (this.io) {
+          this.io.emit('whatsapp:connected', { 
             provider: 'baileys',
             timestamp: new Date() 
           });
@@ -43,9 +49,8 @@ export class WhatsAppManager {
       this.baileysService.on('disconnected', () => {
         logger.warn('⚠️ Baileys desconectado');
         // Emitir evento via Socket.IO para notificar frontend
-        const io = require('../server.js').io;
-        if (io) {
-          io.emit('whatsapp:disconnected', { 
+        if (this.io) {
+          this.io.emit('whatsapp:disconnected', { 
             provider: 'baileys',
             timestamp: new Date() 
           });
@@ -56,9 +61,8 @@ export class WhatsAppManager {
       this.baileysService.on('qr', (qrCode) => {
         logger.info('📱 QR Code gerado, emitindo para frontend...');
         // Emitir evento via Socket.IO para atualizar QR code em tempo real
-        const io = require('../server.js').io;
-        if (io) {
-          io.emit('whatsapp:qr', { 
+        if (this.io) {
+          this.io.emit('whatsapp:qr', { 
             qrCode,
             timestamp: new Date() 
           });

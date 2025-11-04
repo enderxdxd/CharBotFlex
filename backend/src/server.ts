@@ -158,6 +158,10 @@ initSocketHandlers(io);
 async function initializeServices() {
   try {
     const whatsappManager = getWhatsAppManager();
+    
+    // Injetar Socket.IO no WhatsAppManager
+    whatsappManager.setSocketIO(io);
+    
     await whatsappManager.initialize();
     
     // Iniciar job de auto-fechamento de conversas
