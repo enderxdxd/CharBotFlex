@@ -28,11 +28,42 @@ export class WhatsAppManager {
       });
 
       this.baileysService.on('connected', () => {
-        logger.info('Baileys conectado com sucesso');
+        logger.info('✅ Baileys conectado com sucesso');
+        // Emitir evento via Socket.IO para notificar frontend
+        const io = require('../server.js').io;
+        if (io) {
+          io.emit('whatsapp:connected', { 
+            provider: 'baileys',
+            timestamp: new Date() 
+          });
+          logger.info('📡 Evento whatsapp:connected emitido para frontend');
+        }
       });
 
       this.baileysService.on('disconnected', () => {
-        logger.warn('Baileys desconectado');
+        logger.warn('⚠️ Baileys desconectado');
+        // Emitir evento via Socket.IO para notificar frontend
+        const io = require('../server.js').io;
+        if (io) {
+          io.emit('whatsapp:disconnected', { 
+            provider: 'baileys',
+            timestamp: new Date() 
+          });
+          logger.info('📡 Evento whatsapp:disconnected emitido para frontend');
+        }
+      });
+
+      this.baileysService.on('qr', (qrCode) => {
+        logger.info('📱 QR Code gerado, emitindo para frontend...');
+        // Emitir evento via Socket.IO para atualizar QR code em tempo real
+        const io = require('../server.js').io;
+        if (io) {
+          io.emit('whatsapp:qr', { 
+            qrCode,
+            timestamp: new Date() 
+          });
+          logger.info('📡 Evento whatsapp:qr emitido para frontend');
+        }
       });
     }
 

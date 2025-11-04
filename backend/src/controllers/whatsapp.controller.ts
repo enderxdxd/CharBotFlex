@@ -79,15 +79,24 @@ export const getConnections = async (req: AuthRequest, res: Response) => {
 
 export const generateQrCode = async (req: AuthRequest, res: Response) => {
   try {
+    logger.info('🔄 Requisição de QR Code recebida');
     const manager = getWhatsAppManager();
+    
+    // Verificar se Baileys está pronto
+    const isReady = manager.isBaileysReady();
+    logger.info(`📊 Status do Baileys: ${isReady ? 'Conectado' : 'Desconectado'}`);
     
     // Primeiro tenta pegar QR Code existente
     let qrCode = manager.getBaileysQRCode();
 
     // Se não tiver QR Code, força geração de novo
     if (!qrCode) {
-      logger.info('QR Code não disponível, gerando novo...');
+      logger.info('⚠️ QR Code não disponível, gerando novo...');
+      logger.info('🔄 Iniciando processo de geração de QR Code...');
       qrCode = await manager.generateNewQR();
+      logger.info('✅ QR Code gerado com sucesso');
+    } else {
+      logger.info('✅ QR Code existente retornado');
     }
 
     res.json({
@@ -97,7 +106,7 @@ export const generateQrCode = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
-    logger.error('Erro ao gerar QR Code:', error);
+    logger.error('❌ Erro ao gerar QR Code:', error);
     res.status(500).json({
       success: false,
       error: 'Erro ao gerar QR Code. Tente novamente.',

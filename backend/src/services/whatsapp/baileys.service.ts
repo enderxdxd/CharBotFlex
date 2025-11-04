@@ -96,25 +96,40 @@ export class BaileysService extends EventEmitter {
         auth: state,
         printQRInTerminal: true,
         version,
-        defaultQueryTimeoutMs: 60000, // 🔧 CORREÇÃO 4: Aumentar timeout
-        connectTimeoutMs: 60000, // 60 segundos para conectar
-        keepAliveIntervalMs: 30000, // Keep alive a cada 30s
-        // 🔧 CORREÇÃO 5: Adicionar configurações de estabilidade
-        retryRequestDelayMs: 250,
-        maxMsgRetryCount: 5,
+        defaultQueryTimeoutMs: 120000, // 🔧 2 minutos para timeout padrão
+        connectTimeoutMs: 120000, // 2 minutos para conectar
+        keepAliveIntervalMs: 25000, // Keep alive a cada 25s
+        // 🔧 Configurações de estabilidade melhoradas
+        retryRequestDelayMs: 350,
+        maxMsgRetryCount: 10,
         getMessage: async () => undefined,
         markOnlineOnConnect: true,
         syncFullHistory: false,
-        browser: ['ChatBotFlex', 'Chrome', '1.0.0'],
+        // 🔧 CRÍTICO: Identificação do navegador mais estável
+        browser: this.baileys.Browsers.ubuntu('Chrome'),
+        // 🔧 Configurações adicionais para estabilidade
+        qrTimeout: 120000, // 2 minutos para QR code
+        emitOwnEvents: false,
+        shouldIgnoreJid: (jid: string) => jid.endsWith('@broadcast'),
       });
 
       // Event: Atualização de conexão
       this.sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
+        const { connection, lastDisconnect, qr, isNewLogin, isOnline } = update;
+
+        // 🔧 Log detalhado de todos os eventos de conexão
+        logger.info('🔄 Connection Update:', {
+          connection,
+          isNewLogin,
+          isOnline,
+          hasQR: !!qr,
+          hasDisconnect: !!lastDisconnect
+        });
 
         if (qr) {
           this.qrCode = await QRCode.toDataURL(qr);
-          logger.info('📱 QR Code gerado');
+          logger.info('📱 QR Code gerado - Aguardando pareamento...');
+          logger.info('⏳ Mantenha o socket ativo durante o pareamento');
           this.emit('qr', this.qrCode);
         }
 
@@ -196,9 +211,11 @@ export class BaileysService extends EventEmitter {
           this.reconnectAttempts = 0; // Reset contador ao conectar
           this.isInitializing = false; // 🔒 Inicialização concluída com sucesso
           logger.info('✅ Baileys conectado com sucesso!');
+          logger.info('📱 Dispositivo pareado e pronto para uso');
           this.emit('connected');
         } else if (connection === 'connecting') {
           logger.info('🔄 Conectando ao WhatsApp...');
+          logger.info('⏳ Aguardando resposta do servidor WhatsApp...');
         }
       });
 
@@ -457,12 +474,13 @@ export class BaileysService extends EventEmitter {
     // Reinicializar para gerar novo QR Code
     await this.initialize();
     
-    // 🔧 CORREÇÃO 13: Aumentar timeout para 60 segundos
+    // 🔧 Aumentar timeout para 2 minutos (tempo suficiente para gerar QR)
     return new Promise<string>((resolve, reject) => {
       this.qrTimeout = setTimeout(() => {
         this.qrTimeout = null;
-        reject(new Error('Timeout ao gerar QR Code'));
-      }, 60000); // 60 segundos
+        logger.error('❌ Timeout ao gerar QR Code após 120 segundos');
+        reject(new Error('Timeout ao gerar QR Code. Tente novamente.'));
+      }, 120000); // 120 segundos
 
       this.once('qr', (qr) => {
         if (this.qrTimeout) {
