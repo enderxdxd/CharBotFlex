@@ -32,6 +32,11 @@ export class BaileysService extends EventEmitter {
   private reconnecting: boolean = false;
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private qrTimeout: NodeJS.Timeout | null = null;
+  
+  // 🔧 NOVO: Monitoramento de saúde da conexão
+  private healthCheckInterval: NodeJS.Timeout | null = null;
+  private lastMessageTime: Date = new Date();
+  private connectionLostCount: number = 0;
 
   constructor() {
     super();
@@ -210,9 +215,14 @@ export class BaileysService extends EventEmitter {
           this.qrCode = null;
           this.reconnectAttempts = 0; // Reset contador ao conectar
           this.isInitializing = false; // 🔒 Inicialização concluída com sucesso
+          this.lastMessageTime = new Date(); // Reset timer
+          this.connectionLostCount = 0; // Reset contador de perdas
           logger.info('✅ Baileys conectado com sucesso!');
           logger.info('📱 Dispositivo pareado e pronto para uso');
           this.emit('connected');
+          
+          // 🔧 Iniciar health check
+          this.startHealthCheck();
         } else if (connection === 'connecting') {
           logger.info('🔄 Conectando ao WhatsApp...');
           logger.info('⏳ Aguardando resposta do servidor WhatsApp...');
@@ -230,6 +240,9 @@ export class BaileysService extends EventEmitter {
           if (!message.message) continue;
 
           const messageData = this.extractMessageData(message);
+          
+          // 🔧 Atualizar timestamp de última mensagem
+          this.lastMessageTime = new Date();
           
           logger.info('📨 Nova mensagem Baileys:', messageData);
           
@@ -405,6 +418,61 @@ export class BaileysService extends EventEmitter {
     return this.isConnected;
   }
 
+  // 🔧 NOVO: Monitoramento de saúde da conexão
+  private startHealthCheck() {
+    // Limpar health check anterior se existir
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+    }
+
+    logger.info('🏥 Iniciando monitoramento de saúde da conexão Baileys');
+
+    // Verificar saúde a cada 30 segundos
+    this.healthCheckInterval = setInterval(() => {
+      const now = new Date();
+      const timeSinceLastMessage = now.getTime() - this.lastMessageTime.getTime();
+      const minutesSinceLastMessage = Math.floor(timeSinceLastMessage / 60000);
+
+      // Log de saúde
+      logger.info(`🏥 Health Check: Conexão ${this.isConnected ? 'ATIVA' : 'INATIVA'} | Última atividade: ${minutesSinceLastMessage}min atrás`);
+
+      // Se passou mais de 10 minutos sem atividade e está conectado, fazer ping
+      if (this.isConnected && timeSinceLastMessage > 600000) { // 10 minutos
+        logger.warn('⚠️ Sem atividade há 10+ minutos, verificando conexão...');
+        
+        // Tentar enviar presença para verificar se está realmente conectado
+        if (this.sock) {
+          try {
+            this.sock.sendPresenceUpdate('available');
+            logger.info('✅ Ping de presença enviado com sucesso');
+            this.lastMessageTime = new Date(); // Reset timer após ping bem-sucedido
+          } catch (error) {
+            logger.error('❌ Erro ao enviar ping de presença:', error);
+            this.connectionLostCount++;
+            
+            // Se falhou 3 vezes, tentar reconectar
+            if (this.connectionLostCount >= 3) {
+              logger.error('❌ Conexão perdida detectada! Tentando reconectar...');
+              this.isConnected = false;
+              this.connectionLostCount = 0;
+              this.initialize().catch(err => {
+                logger.error('Erro ao reconectar:', err);
+              });
+            }
+          }
+        }
+      }
+    }, 30000); // A cada 30 segundos
+  }
+
+  private stopHealthCheck() {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+      logger.info('🏥 Monitoramento de saúde parado');
+    }
+  }
+
   async disconnect() {
     // 🔒 CORREÇÃO 11: Limpar timeouts ao desconectar
     if (this.reconnectTimeout) {
@@ -415,6 +483,9 @@ export class BaileysService extends EventEmitter {
       clearTimeout(this.qrTimeout);
       this.qrTimeout = null;
     }
+    
+    // 🔧 Parar health check
+    this.stopHealthCheck();
 
     if (this.sock) {
       try {

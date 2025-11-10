@@ -52,7 +52,7 @@ const isOriginAllowed = (origin: string | undefined): boolean => {
   });
 };
 
-// Configurar Socket.IO
+// Configurar Socket.IO com configurações de estabilidade
 const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
@@ -65,7 +65,17 @@ const io = new Server(server, {
     },
     methods: ["GET", "POST"],
     credentials: true
-  }
+  },
+  // ✅ CORREÇÃO: Configurações de heartbeat para manter conexão ativa
+  pingTimeout: 60000, // 60 segundos - tempo máximo sem resposta antes de considerar desconectado
+  pingInterval: 25000, // 25 segundos - intervalo entre pings
+  connectTimeout: 45000, // 45 segundos - timeout para estabelecer conexão
+  transports: ['websocket', 'polling'], // Permitir fallback para polling
+  allowUpgrades: true, // Permitir upgrade de polling para websocket
+  perMessageDeflate: false, // Desabilitar compressão para melhor performance
+  httpCompression: false,
+  // Configurações de reconexão
+  maxHttpBufferSize: 1e8, // 100 MB
 });
 
 // Middlewares globais - CORS COMPLETO

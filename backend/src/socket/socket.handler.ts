@@ -7,6 +7,13 @@ const userService = new UserService();
 const transferService = new TransferService();
 
 export const initSocketHandlers = (io: Server) => {
+  // 🔧 Log de configurações do servidor Socket.IO
+  logger.info('🔧 Configurações Socket.IO:', {
+    pingTimeout: (io.engine as any).opts.pingTimeout,
+    pingInterval: (io.engine as any).opts.pingInterval,
+    transports: (io.engine as any).opts.transports,
+  });
+
   io.on('connection', async (socket: Socket) => {
     const userId = socket.handshake.auth.userId;
 
@@ -16,7 +23,7 @@ export const initSocketHandlers = (io: Server) => {
       return;
     }
 
-    logger.info(`✅ Socket conectado: ${userId}`);
+    logger.info(`✅ Socket conectado: ${userId} | Transport: ${socket.conn.transport.name}`);
 
     // Atualizar status do usuário para online
     try {
