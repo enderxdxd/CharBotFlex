@@ -10,12 +10,12 @@
   },
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc && node scripts/add-js-extensions.js",
+    "build": "tsc && node src/scripts/add-js-extensions.js",
     "start": "node dist/server.js",
     "lint": "eslint src/**/*.ts",
-    "check-deploy": "node scripts/check-deploy-ready.js",
-    "check-node": "node scripts/check-node-version.js",
-    "prestart": "node scripts/check-node-version.js"
+    "check-deploy": "node src/scripts/check-deploy-ready.js",
+    "check-node": "node src/scripts/check-node-version.js",
+    "prestart": "node src/scripts/check-node-version.js"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",
