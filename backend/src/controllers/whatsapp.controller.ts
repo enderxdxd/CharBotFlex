@@ -105,11 +105,19 @@ export const generateQrCode = async (req: AuthRequest, res: Response) => {
         qrCode: qrCode,
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     logger.error('❌ Erro ao gerar QR Code:', error);
+    
+    // Mensagem de erro mais específica
+    let errorMessage = 'Erro ao gerar QR Code. Tente novamente.';
+    if (error.message) {
+      errorMessage = error.message;
+    }
+    
     res.status(500).json({
       success: false,
-      error: 'Erro ao gerar QR Code. Tente novamente.',
+      error: errorMessage,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
     });
   }
 };

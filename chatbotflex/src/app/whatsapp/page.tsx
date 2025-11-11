@@ -46,6 +46,8 @@ export default function WhatsAppPage() {
   const [showQrModal, setShowQrModal] = useState(false);
   const [showFlowModal, setShowFlowModal] = useState(false);
   const [selectedConnection, setSelectedConnection] = useState<string | null>(null);
+  const [qrLoading, setQrLoading] = useState(false);
+  const [qrError, setQrError] = useState(false);
 
   useEffect(() => {
     fetchConnections();
@@ -107,17 +109,28 @@ export default function WhatsAppPage() {
   const handleGenerateQr = async () => {
     try {
       setShowQrModal(true);
+      setQrCode(null);
+      setQrError(false);
+      setQrLoading(true);
       toast.info('Gerando QR Code...');
       
       const response = await api.post('/whatsapp/generate-qr');
       if (response.data.success) {
         setQrCode(response.data.data.qrCode);
+        setQrError(false);
         toast.success('QR Code gerado! Escaneie com seu WhatsApp.');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao gerar QR Code:', error);
-      toast.error('Erro ao gerar QR Code');
-      setShowQrModal(false);
+      
+      // Mostrar mensagem de erro específica se disponível
+      const errorMessage = error.response?.data?.error || 'Erro ao gerar QR Code. Tente novamente.';
+      toast.error(errorMessage, { duration: 5000 });
+      
+      setQrError(true);
+      setQrCode(null);
+    } finally {
+      setQrLoading(false);
     }
   };
 
@@ -321,7 +334,28 @@ export default function WhatsAppPage() {
                   </button>
                 </div>
 
-                {qrCode ? (
+                {qrLoading ? (
+                  <div className="text-center py-8">
+                    <Loader2 className="animate-spin h-8 w-8 text-indigo-600 mx-auto mb-4" />
+                    <p className="text-gray-600 mb-4">Gerando QR Code...</p>
+                    <p className="text-xs text-gray-500">Isso pode levar alguns segundos</p>
+                  </div>
+                ) : qrError ? (
+                  <div className="text-center py-8">
+                    <XCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+                    <p className="text-gray-900 font-medium mb-2">Erro ao gerar QR Code</p>
+                    <p className="text-sm text-gray-600 mb-6">
+                      Verifique sua conexão e os logs do servidor
+                    </p>
+                    <button
+                      onClick={handleGenerateQr}
+                      className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
+                    >
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Tentar Novamente
+                    </button>
+                  </div>
+                ) : qrCode ? (
                   <div className="text-center">
                     <div className="bg-white p-4 rounded-lg border-2 border-gray-200 mb-4">
                       <img 
@@ -343,19 +377,14 @@ export default function WhatsAppPage() {
                       4. Aponte seu celular para esta tela para escanear o código
                     </p>
                     <button
-                      onClick={fetchQrCode}
+                      onClick={handleGenerateQr}
                       className="inline-flex items-center px-4 py-2 text-sm font-medium text-indigo-600 hover:text-indigo-700"
                     >
                       <RefreshCw className="h-4 w-4 mr-2" />
-                      Atualizar QR Code
+                      Gerar Novo QR Code
                     </button>
                   </div>
-                ) : (
-                  <div className="text-center py-8">
-                    <Loader2 className="animate-spin h-8 w-8 text-indigo-600 mx-auto mb-4" />
-                    <p className="text-gray-600">Gerando QR Code...</p>
-                  </div>
-                )}
+                ) : null}
               </div>
             </div>
           </div>

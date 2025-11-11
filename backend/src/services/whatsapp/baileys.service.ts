@@ -505,23 +505,41 @@ export class BaileysService extends EventEmitter {
   }
 
   async forceNewQR() {
-    // 🔒 CORREÇÃO 12: Prevenir múltiplas chamadas simultâneas
+    logger.info('🔄 [forceNewQR] Iniciando processo de geração de QR Code...');
+    
+    // 🔒 Se já está inicializando, aguardar um pouco e tentar novamente
     if (this.isInitializing) {
-      throw new Error('Já existe uma inicialização em andamento');
+      logger.warn('⚠️ [forceNewQR] Inicialização já em andamento, aguardando...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Se ainda está inicializando após 2s, retornar QR existente se houver
+      if (this.isInitializing && this.qrCode) {
+        logger.info('✅ [forceNewQR] Retornando QR Code existente');
+        return this.qrCode;
+      }
+      
+      // Se não tem QR, aguardar mais um pouco
+      if (this.isInitializing) {
+        logger.warn('⚠️ [forceNewQR] Ainda inicializando, aguardando mais 3s...');
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
     }
 
     // Limpar timeout anterior se existir
     if (this.qrTimeout) {
+      logger.info('🧹 [forceNewQR] Limpando timeout anterior');
       clearTimeout(this.qrTimeout);
       this.qrTimeout = null;
     }
 
     // Resetar contador de reconexão
     this.reconnectAttempts = 0;
+    logger.info('🔄 [forceNewQR] Contador de reconexão resetado');
     
     // Desconectar sessão atual se existir
     if (this.sock) {
       try {
+        logger.info('🔌 [forceNewQR] Desconectando sessão anterior...');
         this.sock.ev.removeAllListeners('connection.update');
         this.sock.ev.removeAllListeners('creds.update');
         this.sock.ev.removeAllListeners('messages.upsert');
@@ -529,28 +547,47 @@ export class BaileysService extends EventEmitter {
         this.sock = null;
         this.isConnected = false;
         this.qrCode = null;
-        logger.info('Sessão anterior desconectada');
+        logger.info('✅ [forceNewQR] Sessão anterior desconectada');
       } catch (error) {
-        logger.error('Erro ao desconectar sessão:', error);
+        logger.error('❌ [forceNewQR] Erro ao desconectar sessão:', error);
+        // Continuar mesmo com erro
       }
     }
 
     // Limpar sessão salva
     const sessionDir = path.join(this.sessionPath, 'session');
     if (fs.existsSync(sessionDir)) {
-      fs.rmSync(sessionDir, { recursive: true, force: true });
-      logger.info('Sessão anterior removida');
+      try {
+        logger.info('🗑️ [forceNewQR] Removendo sessão salva...');
+        fs.rmSync(sessionDir, { recursive: true, force: true });
+        logger.info('✅ [forceNewQR] Sessão anterior removida');
+      } catch (error) {
+        logger.error('❌ [forceNewQR] Erro ao remover sessão:', error);
+        // Continuar mesmo com erro
+      }
     }
 
     // Reinicializar para gerar novo QR Code
-    await this.initialize();
+    logger.info('🚀 [forceNewQR] Iniciando nova conexão Baileys...');
+    try {
+      await this.initialize();
+      logger.info('✅ [forceNewQR] Baileys inicializado com sucesso');
+    } catch (error) {
+      logger.error('❌ [forceNewQR] Erro ao inicializar Baileys:', error);
+      throw new Error('Falha ao inicializar WhatsApp. Verifique os logs do servidor.');
+    }
     
     // 🔧 Aumentar timeout para 2 minutos (tempo suficiente para gerar QR)
+    logger.info('⏳ [forceNewQR] Aguardando geração do QR Code (timeout: 120s)...');
     return new Promise<string>((resolve, reject) => {
       this.qrTimeout = setTimeout(() => {
         this.qrTimeout = null;
-        logger.error('❌ Timeout ao gerar QR Code após 120 segundos');
-        reject(new Error('Timeout ao gerar QR Code. Tente novamente.'));
+        logger.error('❌ [forceNewQR] Timeout ao gerar QR Code após 120 segundos');
+        logger.error('💡 [forceNewQR] Possíveis causas:');
+        logger.error('   - Problema de conexão com servidores do WhatsApp');
+        logger.error('   - Firewall bloqueando conexão');
+        logger.error('   - Sessão corrompida não foi removida corretamente');
+        reject(new Error('Timeout ao gerar QR Code. Verifique sua conexão e tente novamente.'));
       }, 120000); // 120 segundos
 
       this.once('qr', (qr) => {
@@ -558,16 +595,18 @@ export class BaileysService extends EventEmitter {
           clearTimeout(this.qrTimeout);
           this.qrTimeout = null;
         }
+        logger.info('✅ [forceNewQR] QR Code gerado com sucesso!');
         resolve(qr);
       });
 
-      // 🔧 CORREÇÃO 14: Também resolver se desconectar (erro)
+      // 🔧 Também rejeitar se desconectar antes de gerar QR
       this.once('disconnected', () => {
         if (this.qrTimeout) {
           clearTimeout(this.qrTimeout);
           this.qrTimeout = null;
         }
-        reject(new Error('Desconectado antes de gerar QR Code'));
+        logger.error('❌ [forceNewQR] Desconectado antes de gerar QR Code');
+        reject(new Error('Conexão perdida antes de gerar QR Code. Tente novamente.'));
       });
     });
   }
