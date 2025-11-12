@@ -311,139 +311,156 @@ const TEMPLATES = [
     ],
   },
   {
-    id: 'fitness',
-    name: 'Academia FlexFitness',
-    description: 'Sistema completo de atendimento para academia',
+    id: 'flexbot2',
+    name: 'FlexBot2 - Fluxo Curto (PT-BR)',
+    description: 'Fluxo principal de atendimento automático da FlexFitnessCenter',
     icon: '💪',
     nodes: [
       {
         id: 'trigger-1',
         type: 'trigger',
-        position: { x: 100, y: 50 },
+        position: { x: 300, y: 50 },
         data: { label: 'Início', triggerType: 'any' },
       },
       {
-        id: 'welcome',
+        id: 'inicio',
         type: 'message',
-        position: { x: 100, y: 180 },
-        data: { label: '💪 Bem-vindo(a) à FlexFitnessCenter!\nÉ um prazer ter você aqui. 🎉\nNossa missão é ajudar você a alcançar seus objetivos de saúde e performance com treinos, serviços e suporte de excelência.' },
-      },
-      {
-        id: 'menu-principal',
-        type: 'message',
-        position: { x: 100, y: 320 },
-        data: { label: '💬 Sobre qual assunto deseja falar?\nDigite o número da opção:\n\n1️⃣ Recursos Humanos (RH)\n2️⃣ Horários de Aulas\n3️⃣ Vendas\n4️⃣ Financeiro' },
+        position: { x: 300, y: 180 },
+        data: { label: '💪 Bem-vindo(a) à FlexFitnessCenter!\nÉ um prazer ter você aqui. 🎉\nNossa missão é ajudar você a alcançar seus objetivos de saúde e performance com treinos, serviços e suporte de excelência.\n\nObs: Eu ainda não sou uma inteligência artificial — por favor, escolha uma das opções abaixo:\n\n1️⃣ Recepção\n2️⃣ Horários de Aulas\n3️⃣ Localização\n4️⃣ Valores e Planos\n5️⃣ Trabalhe Conosco\n6️⃣ Academias Parceiras' },
       },
       {
         id: 'condition-menu',
         type: 'condition',
-        position: { x: 100, y: 460 },
-        data: { label: 'Menu Principal', conditions: ['1', '2', '3', '4'] },
+        position: { x: 300, y: 340 },
+        data: { label: 'Menu Principal', conditions: ['1', '2', '3', '4', '5', '6'] },
+      },
+      // Recepção
+      {
+        id: 'recepcao',
+        type: 'message',
+        position: { x: -200, y: 500 },
+        data: { label: '😔 Que pena que não conseguimos te ajudar por aqui.\n📞 Para atendimento direto, entre em contato com a recepção da unidade desejada:\n- Alphaville: +55 62 99537-8033\n- Buena Vista: +55 62 69244-1708\n- Marista: +55 62 99383-0661\n\n1️⃣ Voltar ao menu principal\n2️⃣ Encerrar conversa' },
+      },
+      {
+        id: 'condition-recepcao',
+        type: 'condition',
+        position: { x: -200, y: 680 },
+        data: { label: 'Opções Recepção', conditions: ['1', '2'] },
+      },
+      // Horários
+      {
+        id: 'horarios',
+        type: 'message',
+        position: { x: 50, y: 500 },
+        data: { label: '📅 Horários das Aulas por Unidade:\n- Alphaville → https://www.flexfitnesscenter.com.br/horarios/alphaville\n- Buena Vista → https://www.flexfitnesscenter.com.br/horarios/buena-vista\n- Marista → https://www.flexfitnesscenter.com.br/horarios/marista\n\n1️⃣ Voltar ao menu principal\n2️⃣ Encerrar conversa' },
+      },
+      {
+        id: 'condition-horarios',
+        type: 'condition',
+        position: { x: 50, y: 680 },
+        data: { label: 'Opções Horários', conditions: ['1', '2'] },
+      },
+      // Localização
+      {
+        id: 'localizacao',
+        type: 'message',
+        position: { x: 300, y: 500 },
+        data: { label: '📍 Localize a unidade mais próxima:\n- Alphaville → https://maps.app.goo.gl/21o1YZGXDEZfPAjR8\n- Buena Vista → https://maps.app.goo.gl/pUbd4cWM3Djx5xZz5\n- Marista → https://maps.app.goo.gl/RyVZUoY8qRtCHGs38\n\n✨ Aproveite o dia para cuidar do corpo e celebrar a vida. Estamos te esperando! 💚\n\n1️⃣ Voltar ao menu principal\n2️⃣ Encerrar conversa' },
+      },
+      {
+        id: 'condition-localizacao',
+        type: 'condition',
+        position: { x: 300, y: 700 },
+        data: { label: 'Opções Localização', conditions: ['1', '2'] },
+      },
+      // Planos
+      {
+        id: 'planos',
+        type: 'message',
+        position: { x: 550, y: 500 },
+        data: { label: '💬 Quer saber os valores dos planos e diárias?\nClique no link da unidade desejada e fale direto com um atendente:\n- 🏋️ Alphaville: https://encurtador.com.br/FTqM\n- 🔥 Buena Vista: https://encurtador.com.br/uGQB\n- 💪 Marista: https://encurtador.com.br/AHSk\n\n1️⃣ Voltar ao menu principal\n2️⃣ Encerrar conversa' },
+      },
+      {
+        id: 'condition-planos',
+        type: 'condition',
+        position: { x: 550, y: 680 },
+        data: { label: 'Opções Planos', conditions: ['1', '2'] },
       },
       // RH
       {
         id: 'rh',
         type: 'message',
-        position: { x: -200, y: 600 },
-        data: { label: '🙌 Quer fazer parte da equipe FlexFitnessCenter?\nO melhor caminho é acessar nosso site e cadastrar seu currículo:\n👉 https://www.flexfitnesscenter.com.br/trabalhe-aqui\n\nNossa equipe entrará em contato assim que surgir uma vaga compatível com o seu perfil.\n\n1️⃣ Voltar ao menu' },
-      },
-      // Horários
-      {
-        id: 'horarios-unidade',
-        type: 'message',
-        position: { x: 100, y: 600 },
-        data: { label: '💬 Qual unidade deseja ver o horário?\nDigite o número da opção:\n\n1️⃣ Alphaville\n2️⃣ Buena Vista\n3️⃣ Marista\n4️⃣ Voltar' },
+        position: { x: 800, y: 500 },
+        data: { label: '🙌 Quer fazer parte da equipe FlexFitnessCenter?\nCadastre seu currículo em nosso site:\n👉 https://www.flexfitnesscenter.com.br/trabalhe-aqui\n\n📢 Todas as vagas também são divulgadas nos stories do Instagram:\n👉 https://www.instagram.com/stories/flexfitnesscenter/\n\n1️⃣ Voltar ao menu principal\n2️⃣ Encerrar conversa' },
       },
       {
-        id: 'condition-horarios',
+        id: 'condition-rh',
         type: 'condition',
-        position: { x: 100, y: 740 },
-        data: { label: 'Escolher Unidade', conditions: ['1', '2', '3', '4'] },
+        position: { x: 800, y: 700 },
+        data: { label: 'Opções RH', conditions: ['1', '2'] },
       },
+      // Parceiras
       {
-        id: 'horarios-alphaville',
+        id: 'parceiras',
         type: 'message',
-        position: { x: -100, y: 880 },
-        data: { label: '📅 Horários das aulas - Alphaville\nhttps://www.flexfitnesscenter.com.br/horarios/alphaville\n\n1️⃣ Voltar ao menu\n2️⃣ Finalizar atendimento' },
+        position: { x: 1050, y: 500 },
+        data: { label: '💪 Alunos FLEX têm direito a até 30 acessos por ano nas academias parceiras (plano ativo obrigatório).\n\n🏋️‍♀️ Como liberar o acesso:\nProcure a recepção da sua unidade e informe os dias em que pretende frequentar.\n\n📍 Academias Parceiras:\n- UNIQUE (Brasília)\n- BETTER YOU (Florianópolis/SC)\n- WELLNESS CLUB (Vitória/ES)\n- PULSE FITNESS (Natal)\n- VILLA FORMA (Salvador)\n- IPANEMA SPORTS (Porto Alegre)\n- GREEN LIFE (Fortaleza)\n\n☎️ Contatos:\n- Alphaville: 62 99537-8033\n- Buena Vista: 62 69244-1708\n- Marista: 62 99383-0661\n\n1️⃣ Voltar ao menu principal\n2️⃣ Encerrar conversa' },
       },
       {
-        id: 'horarios-buenavista',
-        type: 'message',
-        position: { x: 100, y: 880 },
-        data: { label: '📅 Horários das aulas — Unidade Buena Vista\nhttps://www.flexfitnesscenter.com.br/horarios/buena-vista\n\n1️⃣ Voltar ao menu\n2️⃣ Finalizar atendimento' },
-      },
-      {
-        id: 'horarios-marista',
-        type: 'message',
-        position: { x: 300, y: 880 },
-        data: { label: '📅 Horários das aulas - Marista\nhttps://www.flexfitnesscenter.com.br/horarios/marista\n\n1️⃣ Voltar ao menu\n2️⃣ Finalizar atendimento' },
-      },
-      // Vendas
-      {
-        id: 'vendas-unidade',
-        type: 'message',
-        position: { x: 400, y: 600 },
-        data: { label: '💬 Sobre qual unidade deseja falar?\nDigite o número da opção:\n\n1️⃣ Alphaville\n2️⃣ Marista\n3️⃣ Buena Vista\n4️⃣ Voltar' },
-      },
-      {
-        id: 'condition-vendas',
+        id: 'condition-parceiras',
         type: 'condition',
-        position: { x: 400, y: 740 },
-        data: { label: 'Escolher Unidade Vendas', conditions: ['1', '2', '3', '4'] },
+        position: { x: 1050, y: 800 },
+        data: { label: 'Opções Parceiras', conditions: ['1', '2'] },
       },
+      // Encerrar
       {
-        id: 'vendas-alphaville',
+        id: 'encerrar',
         type: 'message',
-        position: { x: 200, y: 880 },
-        data: { label: '⏸️ **Trancamento**\n1️⃣ Diferença de trancamento pago e afastamento\n2️⃣ Por que não aceita atestado?\n\n🕒 **Horários**\n3️⃣ Horário de funcionamento\n\n🎟️ **Aulas**\n4️⃣ Aula experimental\n5️⃣ Meu plano dá direito a convidado?\n\n💳 **Pagamentos**\n6️⃣ O pagamento do plano é recorrente?\n\n0️⃣ Voltar' },
-      },
-      {
-        id: 'vendas-marista',
-        type: 'message',
-        position: { x: 400, y: 880 },
-        data: { label: '💳 **Planos & Pagamentos**\n1️⃣ Informações sobre planos\n2️⃣ Desconto para estudantes?\n3️⃣ Valor da diária?\n\n🎟️ **Aulas**\n4️⃣ Aula experimental é paga?\n5️⃣ A academia fornece toalha?\n\n🕒 **Horários**\n6️⃣ Horário de funcionamento\n\n0️⃣ Voltar' },
-      },
-      {
-        id: 'vendas-buenavista',
-        type: 'message',
-        position: { x: 600, y: 880 },
-        data: { label: '🏷️ **Buena Vista — Valores e Planos**\n1️⃣ Qual o valor da diária?\n2️⃣ Valores das mensalidades?\n3️⃣ Tipos de planos?\n\n📅 **Aulas**\n4️⃣ Aula experimental?\n5️⃣ Horários de aulas coletivas?\n\n0️⃣ Voltar' },
-      },
-      // Financeiro - Transfer
-      {
-        id: 'transfer-financeiro',
-        type: 'transfer',
-        position: { x: 700, y: 600 },
-        data: { label: 'Transferir para Financeiro', department: 'Financeiro' },
+        position: { x: 300, y: 900 },
+        data: { label: '👋 Obrigado por entrar em contato com a FlexFitnessCenter!\nEsperamos ver você em breve! 💚' },
       },
     ],
     edges: [
-      { id: 'e1', source: 'trigger-1', target: 'welcome' },
-      { id: 'e2', source: 'welcome', target: 'menu-principal' },
-      { id: 'e3', source: 'menu-principal', target: 'condition-menu' },
+      { id: 'e1', source: 'trigger-1', target: 'inicio' },
+      { id: 'e2', source: 'inicio', target: 'condition-menu' },
       
       // Menu -> Opções
-      { id: 'e4', source: 'condition-menu', target: 'rh', label: '1' },
-      { id: 'e5', source: 'condition-menu', target: 'horarios-unidade', label: '2' },
-      { id: 'e6', source: 'condition-menu', target: 'vendas-unidade', label: '3' },
-      { id: 'e7', source: 'condition-menu', target: 'transfer-financeiro', label: '4' },
+      { id: 'e3', source: 'condition-menu', target: 'recepcao', label: '1' },
+      { id: 'e4', source: 'condition-menu', target: 'horarios', label: '2' },
+      { id: 'e5', source: 'condition-menu', target: 'localizacao', label: '3' },
+      { id: 'e6', source: 'condition-menu', target: 'planos', label: '4' },
+      { id: 'e7', source: 'condition-menu', target: 'rh', label: '5' },
+      { id: 'e8', source: 'condition-menu', target: 'parceiras', label: '6' },
       
-      // RH -> Voltar
-      { id: 'e8', source: 'rh', target: 'menu-principal' },
+      // Recepção
+      { id: 'e9', source: 'recepcao', target: 'condition-recepcao' },
+      { id: 'e10', source: 'condition-recepcao', target: 'inicio', label: '1' },
+      { id: 'e11', source: 'condition-recepcao', target: 'encerrar', label: '2' },
       
       // Horários
-      { id: 'e9', source: 'horarios-unidade', target: 'condition-horarios' },
-      { id: 'e10', source: 'condition-horarios', target: 'horarios-alphaville', label: '1' },
-      { id: 'e11', source: 'condition-horarios', target: 'horarios-buenavista', label: '2' },
-      { id: 'e12', source: 'condition-horarios', target: 'horarios-marista', label: '3' },
-      { id: 'e13', source: 'condition-horarios', target: 'menu-principal', label: '4' },
+      { id: 'e12', source: 'horarios', target: 'condition-horarios' },
+      { id: 'e13', source: 'condition-horarios', target: 'inicio', label: '1' },
+      { id: 'e14', source: 'condition-horarios', target: 'encerrar', label: '2' },
       
-      // Vendas
-      { id: 'e14', source: 'vendas-unidade', target: 'condition-vendas' },
-      { id: 'e15', source: 'condition-vendas', target: 'vendas-alphaville', label: '1' },
-      { id: 'e16', source: 'condition-vendas', target: 'vendas-marista', label: '2' },
-      { id: 'e17', source: 'condition-vendas', target: 'vendas-buenavista', label: '3' },
-      { id: 'e18', source: 'condition-vendas', target: 'menu-principal', label: '4' },
+      // Localização
+      { id: 'e15', source: 'localizacao', target: 'condition-localizacao' },
+      { id: 'e16', source: 'condition-localizacao', target: 'inicio', label: '1' },
+      { id: 'e17', source: 'condition-localizacao', target: 'encerrar', label: '2' },
+      
+      // Planos
+      { id: 'e18', source: 'planos', target: 'condition-planos' },
+      { id: 'e19', source: 'condition-planos', target: 'inicio', label: '1' },
+      { id: 'e20', source: 'condition-planos', target: 'encerrar', label: '2' },
+      
+      // RH
+      { id: 'e21', source: 'rh', target: 'condition-rh' },
+      { id: 'e22', source: 'condition-rh', target: 'inicio', label: '1' },
+      { id: 'e23', source: 'condition-rh', target: 'encerrar', label: '2' },
+      
+      // Parceiras
+      { id: 'e24', source: 'parceiras', target: 'condition-parceiras' },
+      { id: 'e25', source: 'condition-parceiras', target: 'inicio', label: '1' },
+      { id: 'e26', source: 'condition-parceiras', target: 'encerrar', label: '2' },
     ],
   },
 ];

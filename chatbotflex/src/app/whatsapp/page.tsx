@@ -112,20 +112,34 @@ export default function WhatsAppPage() {
       setQrCode(null);
       setQrError(false);
       setQrLoading(true);
-      toast.info('Gerando QR Code...');
+      toast.info('Conectando ao WhatsApp...', { duration: 3000 });
       
       const response = await api.post('/whatsapp/generate-qr');
       if (response.data.success) {
+        // Verificar se já está conectado
+        if (response.data.data.connected) {
+          toast.success('WhatsApp já está conectado!');
+          setShowQrModal(false);
+          fetchConnections();
+          return;
+        }
+        
         setQrCode(response.data.data.qrCode);
         setQrError(false);
-        toast.success('QR Code gerado! Escaneie com seu WhatsApp.');
+        toast.success('QR Code gerado! Escaneie com seu WhatsApp.', { duration: 5000 });
       }
     } catch (error: any) {
       console.error('Erro ao gerar QR Code:', error);
       
       // Mostrar mensagem de erro específica se disponível
-      const errorMessage = error.response?.data?.error || 'Erro ao gerar QR Code. Tente novamente.';
-      toast.error(errorMessage, { duration: 5000 });
+      const errorMessage = error.response?.data?.error || 'Não foi possível conectar ao WhatsApp. Tente novamente.';
+      toast.error(errorMessage, { 
+        duration: 7000,
+        action: {
+          label: 'Tentar Novamente',
+          onClick: () => handleGenerateQr()
+        }
+      });
       
       setQrError(true);
       setQrCode(null);

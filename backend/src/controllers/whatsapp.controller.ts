@@ -81,10 +81,42 @@ export const generateQrCode = async (req: AuthRequest, res: Response) => {
   try {
     logger.info('🔄 Requisição de QR Code recebida');
     const manager = getWhatsAppManager();
+    const baileysService = (manager as any).baileysService;
     
     // Verificar se Baileys está pronto
     const isReady = manager.isBaileysReady();
     logger.info(`📊 Status do Baileys: ${isReady ? 'Conectado' : 'Desconectado'}`);
+    
+    // Se já está conectado, não precisa gerar QR
+    if (isReady) {
+      logger.info('✅ WhatsApp já está conectado!');
+      return res.json({
+        success: true,
+        data: {
+          qrCode: null,
+          message: 'WhatsApp já está conectado',
+          connected: true,
+        },
+      });
+    }
+    
+    // Verificar se já está tentando gerar QR
+    if (baileysService?.isInitializing) {
+      logger.info('⏳ Já está gerando QR Code, aguardando...');
+      
+      // Aguardar até 10 segundos pelo QR existente
+      for (let i = 0; i < 10; i++) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const qr = manager.getBaileysQRCode();
+        if (qr) {
+          logger.info('✅ QR Code existente encontrado');
+          return res.json({
+            success: true,
+            data: { qrCode: qr },
+          });
+        }
+      }
+    }
     
     // Primeiro tenta pegar QR Code existente
     let qrCode = manager.getBaileysQRCode();
@@ -93,8 +125,24 @@ export const generateQrCode = async (req: AuthRequest, res: Response) => {
     if (!qrCode) {
       logger.info('⚠️ QR Code não disponível, gerando novo...');
       logger.info('🔄 Iniciando processo de geração de QR Code...');
-      qrCode = await manager.generateNewQR();
-      logger.info('✅ QR Code gerado com sucesso');
+      
+      try {
+        qrCode = await manager.generateNewQR();
+        logger.info('✅ QR Code gerado com sucesso');
+      } catch (qrError: any) {
+        logger.error('❌ Erro ao gerar QR Code:', qrError);
+        
+        // Tentar uma segunda vez após 2 segundos
+        logger.info('🔄 Tentando novamente em 2 segundos...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        try {
+          qrCode = await manager.generateNewQR();
+          logger.info('✅ QR Code gerado com sucesso na segunda tentativa');
+        } catch (retryError: any) {
+          throw new Error('Não foi possível gerar QR Code após 2 tentativas. Verifique se o backend está rodando corretamente e tente novamente.');
+        }
+      }
     } else {
       logger.info('✅ QR Code existente retornado');
     }
@@ -108,10 +156,19 @@ export const generateQrCode = async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     logger.error('❌ Erro ao gerar QR Code:', error);
     
-    // Mensagem de erro mais específica
-    let errorMessage = 'Erro ao gerar QR Code. Tente novamente.';
+    // Mensagem de erro mais específica e amigável
+    let errorMessage = 'Não foi possível conectar ao WhatsApp. Tente novamente em alguns instantes.';
+    
     if (error.message) {
-      errorMessage = error.message;
+      if (error.message.includes('Timeout')) {
+        errorMessage = 'Tempo esgotado ao conectar com WhatsApp. Verifique sua conexão com a internet e tente novamente.';
+      } else if (error.message.includes('Conexão perdida')) {
+        errorMessage = 'Conexão com WhatsApp foi perdida. Tente novamente.';
+      } else if (error.message.includes('Falha ao inicializar')) {
+        errorMessage = 'Falha ao inicializar WhatsApp. Verifique se o backend está rodando corretamente.';
+      } else {
+        errorMessage = error.message;
+      }
     }
     
     res.status(500).json({
