@@ -90,34 +90,7 @@ export class BaileysService extends EventEmitter {
         }
       }
       
-      // ✅ PERSISTÊNCIA: Verificar se já existe sessão salva
       const sessionDir = path.join(this.sessionPath, 'session');
-      let hasExistingSession = false;
-      
-      // Verificar se a sessão existe e é válida
-      if (fs.existsSync(sessionDir)) {
-        const files = fs.readdirSync(sessionDir);
-        hasExistingSession = files.length > 0 && files.some(f => f === 'creds.json');
-        
-        if (hasExistingSession) {
-          // Verificar se o arquivo creds.json não está corrompido
-          try {
-            const credsPath = path.join(sessionDir, 'creds.json');
-            const credsContent = fs.readFileSync(credsPath, 'utf-8');
-            JSON.parse(credsContent); // Tenta parsear para validar
-            logger.info('📂 Sessão válida encontrada! Restaurando conexão...');
-          } catch (error) {
-            logger.warn('⚠️ Sessão corrompida detectada! Removendo...');
-            fs.rmSync(sessionDir, { recursive: true, force: true });
-            hasExistingSession = false;
-          }
-        }
-      }
-      
-      if (!hasExistingSession) {
-        logger.info('📂 Nenhuma sessão válida encontrada. Será necessário escanear QR Code.');
-      }
-      
       const { state, saveCreds } = await this.baileys.useMultiFileAuthState(sessionDir);
 
       const { version } = await this.baileys.fetchLatestBaileysVersion();
@@ -169,116 +142,25 @@ export class BaileysService extends EventEmitter {
           const statusCode = err?.output?.statusCode;
           const shouldReconnect = statusCode !== this.baileys!.DisconnectReason.loggedOut;
 
-          // Log completo do erro para debug
-          logger.error('🔴 Conexão fechada - Detalhes completos:', {
+          // Log do erro
+          logger.error('🔴 Conexão fechada:', {
             statusCode,
             message: err?.message,
-            name: err?.name,
-            code: err?.code,
-            data: err?.data,
-            output: err?.output,
             shouldReconnect,
-            reconnectAttempts: this.reconnectAttempts,
-            maxAttempts: this.maxReconnectAttempts,
-            // Códigos de desconexão conhecidos
-            knownReasons: {
-              loggedOut: this.baileys!.DisconnectReason.loggedOut,
-              connectionClosed: this.baileys!.DisconnectReason.connectionClosed,
-              connectionLost: this.baileys!.DisconnectReason.connectionLost,
-              badSession: this.baileys!.DisconnectReason.badSession,
-              timedOut: this.baileys!.DisconnectReason.timedOut,
-            }
+            reconnectAttempts: this.reconnectAttempts
           });
-          
-          // Log adicional se for erro desconhecido
-          if (statusCode && ![401, 428, 440, 500, 503].includes(statusCode)) {
-            logger.warn(`⚠️ Código de status desconhecido: ${statusCode}`);
-            logger.warn('📋 Por favor, reporte este erro com os detalhes acima');
-          }
 
           // 🔒 CORREÇÃO 6: Marcar inicialização como concluída
           this.isInitializing = false;
 
-          // ✅ PERSISTÊNCIA: Verificar se foi logout manual ou apenas desconexão temporária
           if (statusCode === this.baileys!.DisconnectReason.loggedOut) {
-            logger.warn('⚠️ Logout manual detectado. Sessão será removida.');
-            this.reconnectAttempts = 0;
+            logger.warn('⚠️ Desconectado');
             this.isConnected = false;
             this.emit('disconnected');
             return;
           }
 
-          // ✅ PERSISTÊNCIA: Desconexões comuns que devem reconectar automaticamente
-          const reconnectableCodes = [
-            this.baileys!.DisconnectReason.connectionClosed,
-            this.baileys!.DisconnectReason.connectionLost,
-            this.baileys!.DisconnectReason.connectionReplaced,
-            this.baileys!.DisconnectReason.timedOut,
-            this.baileys!.DisconnectReason.restartRequired,
-          ];
-
-          const isReconnectable = reconnectableCodes.includes(statusCode) || !statusCode;
-
-          // 🔧 CORREÇÃO 7: Verificar razões específicas de desconexão
-          if (statusCode === 401 || statusCode === this.baileys!.DisconnectReason.badSession) {
-            logger.error('❌ Sessão inválida. Necessário escanear QR Code novamente.');
-            logger.info('💡 Removendo sessão corrompida...');
-            // Limpar sessão corrompida
-            const sessionDir = path.join(this.sessionPath, 'session');
-            if (fs.existsSync(sessionDir)) {
-              fs.rmSync(sessionDir, { recursive: true, force: true });
-            }
-            this.isConnected = false;
-            this.emit('disconnected');
-            return;
-          }
-
-          // ✅ DETECTAR: "Can't link new devices at this time"
-          const errorMsg = err?.message?.toLowerCase() || '';
-          
-          if (errorMsg.includes("can't link") || errorMsg.includes("can't link new devices")) {
-            logger.error('❌ WhatsApp bloqueou temporariamente novas conexões!');
-            logger.error('💡 Isso acontece quando você tenta conectar/desconectar muitas vezes.');
-            logger.error('💡 SOLUÇÃO: Aguarde 10-15 minutos antes de tentar novamente.');
-            
-            // Limpar sessão para forçar novo QR na próxima tentativa
-            const sessionDir = path.join(this.sessionPath, 'session');
-            if (fs.existsSync(sessionDir)) {
-              fs.rmSync(sessionDir, { recursive: true, force: true });
-              logger.info('🗑️ Sessão removida para permitir nova tentativa depois');
-            }
-            
-            this.isConnected = false;
-            this.emit('error', {
-              code: 'RATE_LIMIT',
-              message: 'O WhatsApp bloqueou temporariamente novas conexões. Aguarde 10-15 minutos e tente novamente. Isso acontece quando você tenta conectar/desconectar muitas vezes seguidas.'
-            });
-            this.emit('disconnected');
-            return;
-          }
-          
-          // ✅ DETECTAR: Limite de dispositivos (código 428)
-          if (statusCode === 428) {
-            // Verificar se é realmente erro de limite de dispositivos
-            if (errorMsg.includes('device') || errorMsg.includes('multidevice') || errorMsg.includes('limit')) {
-              logger.error('❌ Limite de dispositivos atingido!');
-              logger.error('💡 O WhatsApp permite no máximo 4 dispositivos vinculados.');
-              logger.error('💡 Desconecte um dispositivo no seu WhatsApp e tente novamente.');
-              this.isConnected = false;
-              this.emit('error', {
-                code: 'MAX_DEVICES',
-                message: 'Não é possível conectar novos dispositivos. Você atingiu o limite de 4 dispositivos vinculados ao WhatsApp. Desconecte um dispositivo no app do WhatsApp (Configurações > Aparelhos conectados) e tente novamente.'
-              });
-              this.emit('disconnected');
-              return;
-            } else {
-              // Código 428 mas não é erro de dispositivos - tratar como erro genérico
-              logger.warn(`⚠️ Erro 428 recebido mas não é limite de dispositivos: ${errorMsg}`);
-              // Continuar para tentar reconectar
-            }
-          }
-
-          if ((shouldReconnect || isReconnectable) && this.reconnectAttempts < this.maxReconnectAttempts) {
+          if (shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
             // 🔒 Prevenir múltiplas reconexões simultâneas
             if (this.reconnecting) {
               logger.warn('⚠️  Reconexão já em andamento, ignorando...');
