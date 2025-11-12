@@ -233,11 +233,32 @@ export class BaileysService extends EventEmitter {
             return;
           }
 
-          // ✅ NOVO: Detectar limite de dispositivos atingido (código 428)
-          // Mas APENAS se a mensagem realmente indicar isso
-          if (statusCode === 428) {
-            const errorMsg = err?.message?.toLowerCase() || '';
+          // ✅ DETECTAR: "Can't link new devices at this time"
+          const errorMsg = err?.message?.toLowerCase() || '';
+          
+          if (errorMsg.includes("can't link") || errorMsg.includes("can't link new devices")) {
+            logger.error('❌ WhatsApp bloqueou temporariamente novas conexões!');
+            logger.error('💡 Isso acontece quando você tenta conectar/desconectar muitas vezes.');
+            logger.error('💡 SOLUÇÃO: Aguarde 10-15 minutos antes de tentar novamente.');
             
+            // Limpar sessão para forçar novo QR na próxima tentativa
+            const sessionDir = path.join(this.sessionPath, 'session');
+            if (fs.existsSync(sessionDir)) {
+              fs.rmSync(sessionDir, { recursive: true, force: true });
+              logger.info('🗑️ Sessão removida para permitir nova tentativa depois');
+            }
+            
+            this.isConnected = false;
+            this.emit('error', {
+              code: 'RATE_LIMIT',
+              message: 'O WhatsApp bloqueou temporariamente novas conexões. Aguarde 10-15 minutos e tente novamente. Isso acontece quando você tenta conectar/desconectar muitas vezes seguidas.'
+            });
+            this.emit('disconnected');
+            return;
+          }
+          
+          // ✅ DETECTAR: Limite de dispositivos (código 428)
+          if (statusCode === 428) {
             // Verificar se é realmente erro de limite de dispositivos
             if (errorMsg.includes('device') || errorMsg.includes('multidevice') || errorMsg.includes('limit')) {
               logger.error('❌ Limite de dispositivos atingido!');

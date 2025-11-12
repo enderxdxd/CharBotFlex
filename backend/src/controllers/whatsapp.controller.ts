@@ -168,6 +168,8 @@ export const generateQrCode = async (req: AuthRequest, res: Response) => {
         errorMessage = 'Falha ao inicializar WhatsApp. Verifique se o backend está rodando corretamente.';
       } else if (error.message.includes('multidevice') || error.message.includes('dispositivos')) {
         errorMessage = 'Não é possível conectar novos dispositivos. Você atingiu o limite de 4 dispositivos vinculados ao WhatsApp. Desconecte um dispositivo no app do WhatsApp (Configurações > Aparelhos conectados) e tente novamente.';
+      } else if (error.message.toLowerCase().includes("can't link")) {
+        errorMessage = 'O WhatsApp bloqueou temporariamente novas conexões. Aguarde 10-15 minutos e tente novamente. Isso acontece quando você tenta conectar/desconectar muitas vezes seguidas.';
       } else {
         errorMessage = error.message;
       }

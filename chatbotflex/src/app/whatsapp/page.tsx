@@ -61,7 +61,15 @@ export default function WhatsAppPage() {
         socket.on('whatsapp:error', (data: { code: string; message: string }) => {
           console.error('Erro do WhatsApp:', data);
           
-          if (data.code === 'MAX_DEVICES') {
+          if (data.code === 'RATE_LIMIT') {
+            toast.error('WhatsApp bloqueou temporariamente novas conexões', {
+              duration: 15000,
+              description: '⏰ Aguarde 10-15 minutos antes de tentar novamente. Isso acontece quando você tenta conectar/desconectar muitas vezes.',
+            });
+            setQrError(true);
+            setQrLoading(false);
+            setQrCode(null);
+          } else if (data.code === 'MAX_DEVICES') {
             toast.error(data.message, {
               duration: 10000,
               description: 'Vá em: WhatsApp > Configurações > Aparelhos conectados > Desconecte um dispositivo',
