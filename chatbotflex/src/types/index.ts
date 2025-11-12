@@ -86,6 +86,7 @@ export interface Conversation {
   lastMessage?: Message;
   createdAt: Date;
   updatedAt: Date;
+  closedAt?: Date; // Data de encerramento da conversa
   tags: string[];
   priority: 'low' | 'medium' | 'high';
 }

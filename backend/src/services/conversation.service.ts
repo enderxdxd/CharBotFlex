@@ -352,7 +352,8 @@ export class ConversationService {
   async assignConversation(
     conversationId: string,
     operatorId: string,
-    operatorName: string
+    operatorName: string,
+    status?: 'human' | 'bot' | 'waiting'
   ): Promise<IConversation> {
     try {
       const conversation = await this.getConversationById(conversationId);
@@ -360,16 +361,26 @@ export class ConversationService {
         throw new Error('Conversa não encontrada');
       }
 
+      const finalStatus = status || 'human';
       const updateData = {
         assignedTo: operatorId,
         assignedToName: operatorName,
-        status: 'human' as const,
+        status: finalStatus,
         updatedAt: new Date(),
       };
 
       await db.collection(CONVERSATIONS_COLLECTION).doc(conversationId).update(updateData);
 
-      logger.info(`✅ Conversa ${conversationId} atribuída a ${operatorName}`);
+      logger.info(`✅ Conversa ${conversationId} atribuída a ${operatorName} com status ${updateData.status}`);
+
+      // Adicionar mensagem de sistema informando que atendente assumiu
+      if (status === 'human') {
+        await this.sendMessage(conversationId, operatorId, {
+          content: `[Sistema] ${operatorName} assumiu o atendimento`,
+          type: 'text',
+          isFromBot: false,
+        });
+      }
 
       return {
         ...conversation,

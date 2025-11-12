@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { ConversationService } from '../services/conversation.service.js';
 import { AppError } from '../utils/AppError.js';
 import logger from '../utils/logger.js';
+import { db } from '../config/firebase.js';
 
 const conversationService = new ConversationService();
 
@@ -221,16 +222,68 @@ export const reopenConversation = async (req: Request, res: Response) => {
 export const assignConversation = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { operatorId, operatorName } = req.body;
+    const { operatorId, operatorName, status } = req.body;
+    
+    // Tentar múltiplas formas de obter o userId
+    const currentUserId = (req as any).user?.uid || (req as any).user?.id || (req as any).userId;
+    
+    logger.info('🔍 [assignConversation] Dados recebidos:', {
+      conversationId: id,
+      operatorId,
+      operatorName,
+      status,
+      currentUserId,
+      userObject: (req as any).user,
+      headers: {
+        authorization: req.headers.authorization ? 'presente' : 'ausente'
+      }
+    });
 
-    if (!operatorId || !operatorName) {
-      throw new AppError('ID e nome do operador são obrigatórios', 400);
+    // Se não passar operatorId, usar o usuário atual (aceitar conversa)
+    let targetOperatorId = operatorId || currentUserId;
+    let targetOperatorName = operatorName;
+
+    logger.info('🎯 Target inicial:', { targetOperatorId, targetOperatorName });
+
+    // Se não tiver nome, buscar do Firestore
+    if (!targetOperatorName && targetOperatorId) {
+      try {
+        logger.info(`🔍 Buscando usuário ${targetOperatorId} no Firestore...`);
+        const userDoc = await db.collection('users').doc(targetOperatorId).get();
+        
+        if (!userDoc.exists) {
+          logger.error(`❌ Usuário ${targetOperatorId} não encontrado no Firestore`);
+          throw new Error('Usuário não encontrado');
+        }
+        
+        const userData = userDoc.data();
+        targetOperatorName = userData?.name || userData?.email || 'Operador';
+        logger.info(`✅ Nome do operador obtido do Firestore: ${targetOperatorName}`);
+      } catch (error: any) {
+        logger.error('❌ Erro ao buscar nome do usuário:', error.message);
+        targetOperatorName = 'Operador';
+      }
     }
+
+    logger.info('🎯 Target final:', { targetOperatorId, targetOperatorName });
+
+    if (!targetOperatorId) {
+      logger.error('❌ ID do operador não encontrado. Verifique o middleware de autenticação.');
+      throw new AppError('Não foi possível identificar o usuário. Faça login novamente.', 401);
+    }
+
+    if (!targetOperatorName) {
+      logger.error('❌ Nome do operador não encontrado');
+      throw new AppError('Não foi possível obter o nome do operador', 500);
+    }
+
+    logger.info(`✅ Atribuindo conversa ${id} para ${targetOperatorName} (${targetOperatorId})`);
 
     const conversation = await conversationService.assignConversation(
       id,
-      operatorId,
-      operatorName
+      targetOperatorId,
+      targetOperatorName,
+      status || 'human' // Status padrão é 'human'
     );
 
     res.json({

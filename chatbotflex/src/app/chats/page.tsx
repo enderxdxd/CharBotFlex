@@ -134,6 +134,32 @@ export default function ChatsPage() {
     }
   };
 
+  const handleAcceptConversation = async () => {
+    if (!selectedConversation) return;
+
+    try {
+      toast.info('Assumindo controle da conversa...');
+      
+      // Atribuir conversa ao atendente atual
+      const response = await api.post(`/conversations/${selectedConversation.id}/assign`, {
+        status: 'human'
+      });
+
+      if (response.data.success) {
+        toast.success('Você assumiu o controle da conversa!');
+        // Atualizar conversa local
+        await fetchConversations();
+        if (selectedConversation) {
+          await fetchMessages(selectedConversation.id);
+        }
+      }
+    } catch (error: any) {
+      console.error('Erro ao aceitar conversa:', error);
+      const errorMessage = error.response?.data?.error || 'Erro ao aceitar conversa';
+      toast.error(errorMessage);
+    }
+  };
+
   const handleCloseConversation = async () => {
     if (!selectedConversation) return;
 
@@ -168,22 +194,61 @@ export default function ChatsPage() {
     }
   };
 
-  const filteredConversations = conversations.filter(conv => {
-    const matchesSearch = conv.contactName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         conv.phoneNumber.includes(searchQuery);
-    
-    // ✅ CORREÇÃO: "Todas" mostra apenas conversas ATIVAS (não encerradas)
-    let matchesFilter = false;
-    if (filterStatus === 'all') {
-      matchesFilter = conv.status !== 'closed'; // Excluir encerradas
-    } else if (filterStatus === 'closed') {
-      matchesFilter = conv.status === 'closed'; // Apenas encerradas
-    } else {
-      matchesFilter = conv.status === filterStatus;
-    }
-    
-    return matchesSearch && matchesFilter;
-  });
+  const filteredConversations = conversations
+    .filter(conv => {
+      const matchesSearch = conv.contactName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                           conv.phoneNumber.includes(searchQuery);
+      
+      // ✅ CORREÇÃO: "Todas" mostra apenas conversas ATIVAS (não encerradas)
+      let matchesFilter = false;
+      if (filterStatus === 'all') {
+        matchesFilter = conv.status !== 'closed'; // Excluir encerradas
+      } else if (filterStatus === 'closed') {
+        matchesFilter = conv.status === 'closed'; // Apenas encerradas
+      } else {
+        matchesFilter = conv.status === filterStatus;
+      }
+      
+      return matchesSearch && matchesFilter;
+    })
+    .sort((a, b) => {
+      // ✅ Ordenar conversas encerradas por closedAt (mais recente primeiro)
+      if (filterStatus === 'closed') {
+        // Função helper para converter qualquer formato de data
+        const getTimestamp = (dateField: any): number => {
+          if (!dateField) return 0;
+          if (dateField instanceof Date) return dateField.getTime();
+          if (typeof dateField === 'string') return new Date(dateField).getTime();
+          if (dateField._seconds) return dateField._seconds * 1000;
+          if (dateField.toDate) return dateField.toDate().getTime();
+          return new Date(dateField).getTime();
+        };
+
+        const dateA = getTimestamp(a.closedAt);
+        const dateB = getTimestamp(b.closedAt);
+        
+        // Debug: Log das datas para verificar
+        if (dateA && dateB) {
+          console.log(`📅 Ordenação: ${a.contactName} (${new Date(dateA).toLocaleString()}) vs ${b.contactName} (${new Date(dateB).toLocaleString()})`);
+        }
+        
+        return dateB - dateA; // Mais recente primeiro
+      }
+      
+      // Para outras conversas, ordenar por updatedAt
+      const getTimestamp = (dateField: any): number => {
+        if (!dateField) return 0;
+        if (dateField instanceof Date) return dateField.getTime();
+        if (typeof dateField === 'string') return new Date(dateField).getTime();
+        if (dateField._seconds) return dateField._seconds * 1000;
+        if (dateField.toDate) return dateField.toDate().getTime();
+        return new Date(dateField).getTime();
+      };
+
+      const dateA = getTimestamp(a.updatedAt);
+      const dateB = getTimestamp(b.updatedAt);
+      return dateB - dateA; // Mais recente primeiro
+    });
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -322,7 +387,60 @@ export default function ChatsPage() {
                   <div className="flex items-center justify-between mt-2 ml-13">
                     <span className="text-xs text-gray-400 flex items-center">
                       <Clock className="h-3 w-3 mr-1" />
-                      {new Date(conversation.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                      {(() => {
+                        try {
+                          // Para conversas encerradas, mostrar data de encerramento
+                          const dateToShow = conversation.status === 'closed' && conversation.closedAt 
+                            ? conversation.closedAt 
+                            : conversation.updatedAt;
+                          
+                          let date: Date;
+                          if (dateToShow instanceof Date) {
+                            date = dateToShow;
+                          } else if (typeof dateToShow === 'string') {
+                            date = new Date(dateToShow);
+                          } else if ((dateToShow as any)?._seconds) {
+                            date = new Date((dateToShow as any)._seconds * 1000);
+                          } else if ((dateToShow as any)?.toDate) {
+                            date = (dateToShow as any).toDate();
+                          } else {
+                            date = new Date(dateToShow);
+                          }
+                          
+                          if (isNaN(date.getTime())) {
+                            return '--/--';
+                          }
+                          
+                          const now = new Date();
+                          const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                          const messageDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+                          
+                          // Se for hoje, mostrar apenas hora
+                          if (messageDate.getTime() === today.getTime()) {
+                            return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                          }
+                          
+                          // Se for ontem
+                          const yesterday = new Date(today);
+                          yesterday.setDate(yesterday.getDate() - 1);
+                          if (messageDate.getTime() === yesterday.getTime()) {
+                            return 'Ontem';
+                          }
+                          
+                          // Se for esta semana, mostrar dia da semana
+                          const weekAgo = new Date(today);
+                          weekAgo.setDate(weekAgo.getDate() - 7);
+                          if (messageDate > weekAgo) {
+                            return date.toLocaleDateString('pt-BR', { weekday: 'short' });
+                          }
+                          
+                          // Caso contrário, mostrar data completa
+                          return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+                        } catch (error) {
+                          console.error('Erro ao formatar data:', error);
+                          return '--/--';
+                        }
+                      })()}
                     </span>
                   </div>
                 </div>
@@ -360,8 +478,20 @@ export default function ChatsPage() {
                       {getStatusText(selectedConversation.status)}
                     </span>
                     
+                    {/* Botão de Aceitar Conversa (apenas para conversas com bot) */}
+                    {selectedConversation.status === 'bot' && (
+                      <button
+                        onClick={handleAcceptConversation}
+                        className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors shadow-sm"
+                        title="Aceitar e assumir controle"
+                      >
+                        <CheckCircle className="h-4 w-4" />
+                        <span className="hidden sm:inline">Aceitar</span>
+                      </button>
+                    )}
+                    
                     {/* Botão de Transferir Conversa */}
-                    {selectedConversation.status !== 'closed' && (
+                    {selectedConversation.status !== 'closed' && selectedConversation.status !== 'bot' && (
                       <button
                         onClick={() => setShowTransferModal(true)}
                         className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
