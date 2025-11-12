@@ -92,13 +92,30 @@ export class BaileysService extends EventEmitter {
       
       // ✅ PERSISTÊNCIA: Verificar se já existe sessão salva
       const sessionDir = path.join(this.sessionPath, 'session');
-      const hasExistingSession = fs.existsSync(sessionDir) && 
-                                 fs.readdirSync(sessionDir).length > 0;
+      let hasExistingSession = false;
       
-      if (hasExistingSession) {
-        logger.info('📂 Sessão existente encontrada! Restaurando conexão...');
-      } else {
-        logger.info('📂 Nenhuma sessão encontrada. Será necessário escanear QR Code.');
+      // Verificar se a sessão existe e é válida
+      if (fs.existsSync(sessionDir)) {
+        const files = fs.readdirSync(sessionDir);
+        hasExistingSession = files.length > 0 && files.some(f => f === 'creds.json');
+        
+        if (hasExistingSession) {
+          // Verificar se o arquivo creds.json não está corrompido
+          try {
+            const credsPath = path.join(sessionDir, 'creds.json');
+            const credsContent = fs.readFileSync(credsPath, 'utf-8');
+            JSON.parse(credsContent); // Tenta parsear para validar
+            logger.info('📂 Sessão válida encontrada! Restaurando conexão...');
+          } catch (error) {
+            logger.warn('⚠️ Sessão corrompida detectada! Removendo...');
+            fs.rmSync(sessionDir, { recursive: true, force: true });
+            hasExistingSession = false;
+          }
+        }
+      }
+      
+      if (!hasExistingSession) {
+        logger.info('📂 Nenhuma sessão válida encontrada. Será necessário escanear QR Code.');
       }
       
       const { state, saveCreds } = await this.baileys.useMultiFileAuthState(sessionDir);
@@ -153,16 +170,31 @@ export class BaileysService extends EventEmitter {
           const shouldReconnect = statusCode !== this.baileys!.DisconnectReason.loggedOut;
 
           // Log completo do erro para debug
-          logger.error('🔴 Conexão fechada - Detalhes:', {
+          logger.error('🔴 Conexão fechada - Detalhes completos:', {
             statusCode,
             message: err?.message,
             name: err?.name,
             code: err?.code,
             data: err?.data,
+            output: err?.output,
             shouldReconnect,
             reconnectAttempts: this.reconnectAttempts,
-            maxAttempts: this.maxReconnectAttempts
+            maxAttempts: this.maxReconnectAttempts,
+            // Códigos de desconexão conhecidos
+            knownReasons: {
+              loggedOut: this.baileys!.DisconnectReason.loggedOut,
+              connectionClosed: this.baileys!.DisconnectReason.connectionClosed,
+              connectionLost: this.baileys!.DisconnectReason.connectionLost,
+              badSession: this.baileys!.DisconnectReason.badSession,
+              timedOut: this.baileys!.DisconnectReason.timedOut,
+            }
           });
+          
+          // Log adicional se for erro desconhecido
+          if (statusCode && ![401, 428, 440, 500, 503].includes(statusCode)) {
+            logger.warn(`⚠️ Código de status desconhecido: ${statusCode}`);
+            logger.warn('📋 Por favor, reporte este erro com os detalhes acima');
+          }
 
           // 🔒 CORREÇÃO 6: Marcar inicialização como concluída
           this.isInitializing = false;
@@ -199,6 +231,30 @@ export class BaileysService extends EventEmitter {
             this.isConnected = false;
             this.emit('disconnected');
             return;
+          }
+
+          // ✅ NOVO: Detectar limite de dispositivos atingido (código 428)
+          // Mas APENAS se a mensagem realmente indicar isso
+          if (statusCode === 428) {
+            const errorMsg = err?.message?.toLowerCase() || '';
+            
+            // Verificar se é realmente erro de limite de dispositivos
+            if (errorMsg.includes('device') || errorMsg.includes('multidevice') || errorMsg.includes('limit')) {
+              logger.error('❌ Limite de dispositivos atingido!');
+              logger.error('💡 O WhatsApp permite no máximo 4 dispositivos vinculados.');
+              logger.error('💡 Desconecte um dispositivo no seu WhatsApp e tente novamente.');
+              this.isConnected = false;
+              this.emit('error', {
+                code: 'MAX_DEVICES',
+                message: 'Não é possível conectar novos dispositivos. Você atingiu o limite de 4 dispositivos vinculados ao WhatsApp. Desconecte um dispositivo no app do WhatsApp (Configurações > Aparelhos conectados) e tente novamente.'
+              });
+              this.emit('disconnected');
+              return;
+            } else {
+              // Código 428 mas não é erro de dispositivos - tratar como erro genérico
+              logger.warn(`⚠️ Erro 428 recebido mas não é limite de dispositivos: ${errorMsg}`);
+              // Continuar para tentar reconectar
+            }
           }
 
           if ((shouldReconnect || isReconnectable) && this.reconnectAttempts < this.maxReconnectAttempts) {

@@ -53,6 +53,32 @@ export default function WhatsAppPage() {
     fetchConnections();
     fetchQrCode();
     fetchBotFlows();
+
+    // Escutar eventos do Socket.IO para erros do WhatsApp
+    if (typeof window !== 'undefined') {
+      const socket = (window as any).socket;
+      if (socket) {
+        socket.on('whatsapp:error', (data: { code: string; message: string }) => {
+          console.error('Erro do WhatsApp:', data);
+          
+          if (data.code === 'MAX_DEVICES') {
+            toast.error(data.message, {
+              duration: 10000,
+              description: 'Vá em: WhatsApp > Configurações > Aparelhos conectados > Desconecte um dispositivo',
+            });
+            setQrError(true);
+            setQrLoading(false);
+            setQrCode(null);
+          } else {
+            toast.error(data.message, { duration: 7000 });
+          }
+        });
+
+        return () => {
+          socket.off('whatsapp:error');
+        };
+      }
+    }
   }, []);
 
   const fetchConnections = async () => {

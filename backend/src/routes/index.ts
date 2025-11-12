@@ -79,6 +79,7 @@ router.post('/whatsapp/generate-qr', whatsappController.generateQrCode as any);
 router.post('/whatsapp/disconnect/:id', whatsappController.disconnectWhatsApp as any);
 router.post('/whatsapp/restart', whatsappController.restartWhatsApp as any);
 router.post('/whatsapp/link-flow/:id', whatsappController.linkBotFlow as any);
+router.post('/whatsapp/clear-session', whatsappController.clearSession as any);
 
 // ==========================================
 // ROTAS DE DEPARTAMENTOS

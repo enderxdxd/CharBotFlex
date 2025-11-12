@@ -166,6 +166,8 @@ export const generateQrCode = async (req: AuthRequest, res: Response) => {
         errorMessage = 'Conexão com WhatsApp foi perdida. Tente novamente.';
       } else if (error.message.includes('Falha ao inicializar')) {
         errorMessage = 'Falha ao inicializar WhatsApp. Verifique se o backend está rodando corretamente.';
+      } else if (error.message.includes('multidevice') || error.message.includes('dispositivos')) {
+        errorMessage = 'Não é possível conectar novos dispositivos. Você atingiu o limite de 4 dispositivos vinculados ao WhatsApp. Desconecte um dispositivo no app do WhatsApp (Configurações > Aparelhos conectados) e tente novamente.';
       } else {
         errorMessage = error.message;
       }
@@ -278,6 +280,43 @@ export const linkBotFlow = async (req: AuthRequest, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Erro ao vincular bot flow',
+    });
+  }
+};
+
+export const clearSession = async (req: AuthRequest, res: Response) => {
+  try {
+    const manager = getWhatsAppManager();
+    const baileysService = (manager as any).baileysService;
+    
+    logger.info('🗑️ Limpando sessão do WhatsApp...');
+    
+    // Desconectar se estiver conectado
+    if (manager.isBaileysReady()) {
+      await manager.disconnect();
+      logger.info('✅ WhatsApp desconectado');
+    }
+    
+    // Limpar sessão salva
+    const sessionPath = process.env.BAILEYS_SESSION_PATH || '/data/baileys_sessions';
+    const sessionDir = require('path').join(sessionPath, 'session');
+    
+    if (require('fs').existsSync(sessionDir)) {
+      require('fs').rmSync(sessionDir, { recursive: true, force: true });
+      logger.info('✅ Sessão removida com sucesso');
+    } else {
+      logger.info('ℹ️ Nenhuma sessão encontrada para remover');
+    }
+    
+    res.json({
+      success: true,
+      message: 'Sessão limpa com sucesso. Você pode conectar novamente agora.',
+    });
+  } catch (error) {
+    logger.error('Erro ao limpar sessão:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao limpar sessão do WhatsApp',
     });
   }
 };

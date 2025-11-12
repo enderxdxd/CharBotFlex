@@ -69,6 +69,19 @@ export class WhatsAppManager {
           logger.info('📡 Evento whatsapp:qr emitido para frontend');
         }
       });
+
+      this.baileysService.on('error', (error) => {
+        logger.error('❌ Erro no Baileys:', error);
+        // Emitir evento de erro para o frontend
+        if (this.io) {
+          this.io.emit('whatsapp:error', { 
+            code: error.code,
+            message: error.message,
+            timestamp: new Date() 
+          });
+          logger.info('📡 Evento whatsapp:error emitido para frontend');
+        }
+      });
     }
 
     logger.info(`🔗 WhatsApp Manager inicializado com provider: ${this.currentProvider}`);
