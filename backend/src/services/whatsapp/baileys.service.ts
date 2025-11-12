@@ -90,9 +90,18 @@ export class BaileysService extends EventEmitter {
         }
       }
       
-      const { state, saveCreds } = await this.baileys.useMultiFileAuthState(
-        path.join(this.sessionPath, 'session')
-      );
+      // ✅ PERSISTÊNCIA: Verificar se já existe sessão salva
+      const sessionDir = path.join(this.sessionPath, 'session');
+      const hasExistingSession = fs.existsSync(sessionDir) && 
+                                 fs.readdirSync(sessionDir).length > 0;
+      
+      if (hasExistingSession) {
+        logger.info('📂 Sessão existente encontrada! Restaurando conexão...');
+      } else {
+        logger.info('📂 Nenhuma sessão encontrada. Será necessário escanear QR Code.');
+      }
+      
+      const { state, saveCreds } = await this.baileys.useMultiFileAuthState(sessionDir);
 
       const { version } = await this.baileys.fetchLatestBaileysVersion();
       logger.info(`📦 Versão do Baileys: ${version.join('.')}`);
@@ -158,23 +167,41 @@ export class BaileysService extends EventEmitter {
           // 🔒 CORREÇÃO 6: Marcar inicialização como concluída
           this.isInitializing = false;
 
-          // Se foi logout manual, resetar contador
+          // ✅ PERSISTÊNCIA: Verificar se foi logout manual ou apenas desconexão temporária
           if (statusCode === this.baileys!.DisconnectReason.loggedOut) {
+            logger.warn('⚠️ Logout manual detectado. Sessão será removida.');
             this.reconnectAttempts = 0;
             this.isConnected = false;
             this.emit('disconnected');
             return;
           }
 
+          // ✅ PERSISTÊNCIA: Desconexões comuns que devem reconectar automaticamente
+          const reconnectableCodes = [
+            this.baileys!.DisconnectReason.connectionClosed,
+            this.baileys!.DisconnectReason.connectionLost,
+            this.baileys!.DisconnectReason.connectionReplaced,
+            this.baileys!.DisconnectReason.timedOut,
+            this.baileys!.DisconnectReason.restartRequired,
+          ];
+
+          const isReconnectable = reconnectableCodes.includes(statusCode) || !statusCode;
+
           // 🔧 CORREÇÃO 7: Verificar razões específicas de desconexão
-          if (statusCode === 401) {
+          if (statusCode === 401 || statusCode === this.baileys!.DisconnectReason.badSession) {
             logger.error('❌ Sessão inválida. Necessário escanear QR Code novamente.');
+            logger.info('💡 Removendo sessão corrompida...');
+            // Limpar sessão corrompida
+            const sessionDir = path.join(this.sessionPath, 'session');
+            if (fs.existsSync(sessionDir)) {
+              fs.rmSync(sessionDir, { recursive: true, force: true });
+            }
             this.isConnected = false;
             this.emit('disconnected');
             return;
           }
 
-          if (shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
+          if ((shouldReconnect || isReconnectable) && this.reconnectAttempts < this.maxReconnectAttempts) {
             // 🔒 Prevenir múltiplas reconexões simultâneas
             if (this.reconnecting) {
               logger.warn('⚠️  Reconexão já em andamento, ignorando...');
@@ -217,8 +244,17 @@ export class BaileysService extends EventEmitter {
           this.isInitializing = false; // 🔒 Inicialização concluída com sucesso
           this.lastMessageTime = new Date(); // Reset timer
           this.connectionLostCount = 0; // Reset contador de perdas
-          logger.info('✅ Baileys conectado com sucesso!');
-          logger.info('📱 Dispositivo pareado e pronto para uso');
+          
+          // ✅ PERSISTÊNCIA: Informar se foi restauração ou novo login
+          if (isNewLogin) {
+            logger.info('✅ Baileys conectado com sucesso! (NOVO LOGIN)');
+            logger.info('📱 Dispositivo pareado pela primeira vez');
+          } else {
+            logger.info('✅ Baileys conectado com sucesso! (SESSÃO RESTAURADA)');
+            logger.info('📱 Sessão anterior restaurada automaticamente');
+            logger.info('🎉 Não é necessário escanear QR Code novamente!');
+          }
+          
           this.emit('connected');
           
           // 🔧 Iniciar health check
