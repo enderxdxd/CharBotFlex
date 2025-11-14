@@ -11,6 +11,7 @@ export class FlowEngine {
     context: IConversationContext;
     transferToHuman?: boolean;
     department?: string;
+    endConversation?: boolean;
   }> {
     try {
       // Se não tem stage, iniciar com saudação
@@ -228,6 +229,9 @@ export class FlowEngine {
       
       case 'transfer':
         return await this.processTransferNode(currentNode, context);
+      
+      case 'end':
+        return await this.processEndNode(currentNode, context);
       
       case 'trigger':
         // Trigger já foi processado no início, avançar para nextNode
@@ -567,6 +571,29 @@ export class FlowEngine {
       },
       transferToHuman: true,
       department, // ✅ Passar departamento para o handler
+    };
+  }
+
+  private async processEndNode(
+    node: IFlowNode,
+    context: IConversationContext
+  ) {
+    // ✅ Pegar mensagem de encerramento do node
+    const endMessage = (node.data as any)?.label || 
+                       node.content || 
+                       'Atendimento encerrado. Obrigado pelo contato! 👋\n\nSe precisar de algo, é só enviar uma mensagem que começamos novamente.';
+    
+    logger.info(`🏁 Encerrando atendimento`);
+    
+    // ✅ Resetar contexto para 'initial' - próxima mensagem reinicia o fluxo
+    return {
+      message: endMessage,
+      context: {
+        stage: 'initial',
+        userData: {}, // Limpar dados do usuário
+        lastIntent: 'ended',
+      },
+      endConversation: true, // Flag para indicar que a conversa foi encerrada
     };
   }
 

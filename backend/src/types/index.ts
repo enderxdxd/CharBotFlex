@@ -85,7 +85,7 @@ export interface ITrigger {
 
 export interface IFlowNode {
   id: string;
-  type: 'message' | 'menu' | 'question' | 'condition' | 'transfer' | 'trigger' | 'input';
+  type: 'message' | 'menu' | 'question' | 'condition' | 'transfer' | 'trigger' | 'input' | 'end';
   content: string;
   options?: string[];
   nextNode?: string;

@@ -100,16 +100,45 @@ export class MessageHandler {
   }
 
   private async getOrCreateConversation(phoneNumber: string, contactName: string, source: 'baileys' | 'official') {
-    // Buscar conversa existente
+    // Buscar conversa existente (incluindo 'closed' para reabrir)
     const snapshot = await db.collection(collections.conversations)
       .where('phoneNumber', '==', phoneNumber)
-      .where('status', 'in', ['bot', 'human', 'waiting'])
+      .where('status', 'in', ['bot', 'human', 'waiting', 'closed'])
+      .orderBy('updatedAt', 'desc')
       .limit(1)
       .get();
 
     if (!snapshot.empty) {
       const doc = snapshot.docs[0];
       const data = doc.data();
+      
+      // ✅ Se conversa estava fechada, reabrir e resetar contexto
+      if (data.status === 'closed') {
+        logger.info(`🔄 Reabrindo conversa fechada: ${doc.id}`);
+        await db.collection(collections.conversations).doc(doc.id).update({
+          status: 'bot',
+          contactName,
+          context: {
+            stage: 'initial',
+            userData: {},
+            lastIntent: '',
+          },
+          updatedAt: new Date(),
+          lastActivity: new Date(),
+        });
+        
+        return { 
+          id: doc.id, 
+          ...data,
+          status: 'bot',
+          contactName,
+          context: {
+            stage: 'initial',
+            userData: {},
+            lastIntent: '',
+          }
+        };
+      }
       
       // Atualizar nome do contato se mudou
       if (data.contactName !== contactName && contactName !== phoneNumber) {
@@ -194,11 +223,25 @@ export class MessageHandler {
   private async processBotMessage(conversation: any, content: string, phoneNumber: string) {
     try {
       logger.info('🔄 Iniciando processBotMessage...');
+      logger.info(`📞 Conversa ID: ${conversation.id}`);
+      logger.info(`📱 Telefone: ${phoneNumber}`);
+      logger.info(`💬 Mensagem: "${content}"`);
       
       // Buscar contexto da conversa
       logger.info('📋 Buscando contexto da conversa...');
-      const context = await this.contextManager.getContext(conversation.id);
-      logger.info('✅ Contexto obtido:', context);
+      let context = await this.contextManager.getContext(conversation.id);
+      
+      // ✅ Se contexto vier null/undefined, usar o contexto da conversa
+      if (!context || !context.stage) {
+        logger.warn('⚠️ Contexto do manager inválido, usando contexto da conversa');
+        context = conversation.context || {
+          stage: 'initial',
+          userData: {},
+          lastIntent: '',
+        };
+      }
+      
+      logger.info('✅ Contexto obtido:', JSON.stringify(context, null, 2));
 
       // Processar mensagem pelo Flow Engine
       logger.info('⚙️ Processando mensagem pelo Flow Engine...');
@@ -206,7 +249,9 @@ export class MessageHandler {
       logger.info('✅ Resposta do Flow Engine:', { 
         hasMessage: !!response.message, 
         messagePreview: response.message?.substring(0, 50),
-        transferToHuman: response.transferToHuman 
+        transferToHuman: response.transferToHuman,
+        endConversation: response.endConversation,
+        newStage: response.context?.stage
       });
 
       // Atualizar contexto
@@ -272,10 +317,21 @@ export class MessageHandler {
         await this.transferToHuman(conversation.id, response.department);
       }
       
+      // Verificar se deve encerrar a conversa
+      if (response.endConversation) {
+        logger.info('🏁 Encerrando conversa...');
+        await this.endConversation(conversation.id);
+      }
+      
       logger.info('✅ processBotMessage concluído com sucesso!');
     } catch (error) {
-      logger.error('❌ ERRO em processBotMessage:', error);
-      logger.error('Stack trace:', (error as Error).stack);
+      logger.error('❌❌❌ ERRO CRÍTICO em processBotMessage ❌❌❌');
+      logger.error('Tipo do erro:', (error as Error).name);
+      logger.error('Mensagem do erro:', (error as Error).message);
+      logger.error('Stack trace completo:', (error as Error).stack);
+      logger.error('Conversa ID:', conversation.id);
+      logger.error('Telefone:', phoneNumber);
+      logger.error('Mensagem recebida:', content);
       
       // Tentar enviar mensagem de erro ao usuário
       try {
@@ -284,7 +340,7 @@ export class MessageHandler {
           'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
         );
       } catch (sendError) {
-        logger.error('Erro ao enviar mensagem de erro:', sendError);
+        logger.error('❌ Erro ao enviar mensagem de erro:', sendError);
       }
     }
   }
@@ -393,6 +449,33 @@ export class MessageHandler {
       }
     } catch (error) {
       logger.error('Erro ao transferir para humano:', error);
+    }
+  }
+
+  private async endConversation(conversationId: string) {
+    try {
+      logger.info(`🏁 Encerrando conversa ${conversationId}`);
+      
+      // ✅ Atualizar status E contexto da conversa
+      await db.collection(collections.conversations).doc(conversationId).update({
+        status: 'closed',
+        closedAt: new Date(),
+        updatedAt: new Date(),
+        // ✅ IMPORTANTE: Resetar contexto para 'initial' para próxima mensagem
+        context: {
+          stage: 'initial',
+          userData: {},
+          lastIntent: 'ended',
+        },
+      });
+      
+      logger.info(`✅ Conversa ${conversationId} encerrada com sucesso (contexto resetado)`);
+      
+      // Emitir evento de conversa encerrada
+      io.emit('conversation:closed', { conversationId });
+      logger.info(`📡 Evento 'conversation:closed' emitido`);
+    } catch (error) {
+      logger.error('Erro ao encerrar conversa:', error);
     }
   }
 }

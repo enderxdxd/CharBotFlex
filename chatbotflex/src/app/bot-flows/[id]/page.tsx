@@ -177,12 +177,40 @@ function TriggerNode({ data, selected }: any) {
   );
 }
 
+function EndNode({ data, selected }: any) {
+  const firstLine = (data.label || 'Atendimento encerrado').split('\n')[0];
+  const preview = firstLine.length > 40 ? firstLine.substring(0, 40) + '...' : firstLine;
+  
+  return (
+    <>
+      <div className={`px-3 py-2 shadow-md rounded-lg bg-gradient-to-br from-red-500 to-pink-600 border-2 ${
+        selected ? 'border-white ring-2 ring-red-200' : 'border-red-400'
+      } min-w-[180px] max-w-[220px] transition-all hover:shadow-lg`}>
+        <div className="flex items-center gap-2 mb-1">
+          <div className="p-1 bg-white/20 rounded">
+            <Clock className="h-3 w-3 text-white" />
+          </div>
+          <div className="font-semibold text-xs text-white">🏁 Finalizar</div>
+        </div>
+        <div className="text-xs text-white/90">{preview}</div>
+        <div className="mt-1 text-xs text-white/70">
+          Próxima msg reinicia
+        </div>
+      </div>
+      <Handle type="target" position={Position.Top} className="!bg-white !w-4 !h-4" />
+      <Handle type="target" position={Position.Left} className="!bg-white !w-4 !h-4" />
+      <Handle type="target" position={Position.Right} className="!bg-white !w-4 !h-4" />
+    </>
+  );
+}
+
 const nodeTypes = {
   message: MessageNode,
   condition: ConditionNode,
   input: InputNode,
   transfer: TransferNode,
   trigger: TriggerNode,
+  end: EndNode,
 };
 
 // Templates prontos
@@ -852,6 +880,17 @@ export default function ImprovedFlowEditor() {
                     <div className="text-xs">Passar para atendente humano</div>
                   </div>
                 </button>
+
+                <button
+                  onClick={() => addNode('end')}
+                  className="w-full flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-red-50 to-pink-50 text-red-700 rounded-lg hover:from-red-100 hover:to-pink-100 transition-all border-2 border-red-200"
+                >
+                  <Clock className="h-5 w-5" />
+                  <div className="text-left flex-1">
+                    <div className="font-semibold">🏁 Finalizar</div>
+                    <div className="text-xs">Encerrar atendimento</div>
+                  </div>
+                </button>
               </div>
             ) : (
               // ✅ MODO AVANÇADO: Todos os componentes
@@ -918,6 +957,19 @@ export default function ImprovedFlowEditor() {
                   <div className="text-left flex-1">
                     <div className="font-medium text-sm">Transferir</div>
                     <div className="text-xs text-purple-600">Para atendente</div>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => addNode('end')}
+                  className="w-full flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-red-50 to-pink-50 text-red-700 rounded-lg hover:from-red-100 hover:to-pink-100 transition-all border border-red-200"
+                >
+                  <div className="p-1.5 bg-red-100 rounded">
+                    <Clock className="h-4 w-4" />
+                  </div>
+                  <div className="text-left flex-1">
+                    <div className="font-medium text-sm">Finalizar</div>
+                    <div className="text-xs text-red-600">Encerra conversa</div>
                   </div>
                 </button>
               </div>
