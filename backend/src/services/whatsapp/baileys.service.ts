@@ -117,6 +117,25 @@ export class BaileysService extends EventEmitter {
         shouldIgnoreJid: (jid: string) => jid.endsWith('@broadcast'),
       });
 
+      // 🔒 CRÍTICO: Tratar erros do WebSocket para evitar crash
+      if (this.sock.ws) {
+        this.sock.ws.on('error', (error: any) => {
+          logger.warn('⚠️ WebSocket error (tratado, não vai crashar):', error.message);
+          // Não fazer nada - deixar o handler de connection.update lidar com isso
+        });
+
+        this.sock.ws.on('close', (code: number, reason: string) => {
+          logger.info(`🔌 WebSocket fechado: code=${code}, reason=${reason || 'sem motivo'}`);
+          // Não fazer nada - connection.update vai lidar com reconexão
+        });
+      }
+
+      // 🔒 Tratar erros não capturados do socket
+      this.sock.ev.on('error' as any, (error: any) => {
+        logger.warn('⚠️ Socket error event (tratado):', error.message);
+        // Não propagar o erro - apenas logar
+      });
+
       // Event: Atualização de conexão
       this.sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr, isNewLogin, isOnline } = update;
@@ -142,20 +161,31 @@ export class BaileysService extends EventEmitter {
           const statusCode = err?.output?.statusCode;
           const shouldReconnect = statusCode !== this.baileys!.DisconnectReason.loggedOut;
 
-          // Log do erro
-          logger.error('🔴 Conexão fechada:', {
-            statusCode,
-            message: err?.message,
-            shouldReconnect,
-            reconnectAttempts: this.reconnectAttempts
-          });
+          // 🔒 Tratar 'Stream Errored' como desconexão normal, não erro fatal
+          const isStreamError = err?.message?.includes('Stream Errored') || 
+                               err?.message?.includes('Connection Closed') ||
+                               err?.message?.includes('Connection Terminated');
+
+          if (isStreamError) {
+            logger.info('🔌 Conexão perdida (stream error) - Isso é normal, vou reconectar...');
+          } else {
+            // Log do erro apenas se não for stream error
+            logger.warn('⚠️ Conexão fechada:', {
+              statusCode,
+              message: err?.message,
+              shouldReconnect,
+              reconnectAttempts: this.reconnectAttempts
+            });
+          }
 
           // 🔒 CORREÇÃO 6: Marcar inicialização como concluída
           this.isInitializing = false;
 
           if (statusCode === this.baileys!.DisconnectReason.loggedOut) {
-            logger.warn('⚠️ Desconectado');
+            logger.warn('⚠️ Usuário fez logout do WhatsApp');
+            logger.info('💡 Para reconectar, acesse /whatsapp e escaneie o QR Code');
             this.isConnected = false;
+            this.reconnectAttempts = 0;
             this.emit('disconnected');
             return;
           }
@@ -176,23 +206,29 @@ export class BaileysService extends EventEmitter {
               30000 // máximo 30s
             );
             
-            logger.warn(`⚠️  Tentativa de reconexão ${this.reconnectAttempts}/${this.maxReconnectAttempts} em ${delay}ms`);
+            logger.info(`🔄 Reconectando automaticamente (${this.reconnectAttempts}/${this.maxReconnectAttempts}) em ${Math.round(delay/1000)}s...`);
             
             // 🔒 Armazenar timeout para poder cancelar
             this.reconnectTimeout = setTimeout(async () => {
               try {
+                logger.info('🚀 Iniciando tentativa de reconexão...');
                 await this.initialize();
+              } catch (error) {
+                logger.error('❌ Erro na reconexão:', error);
+                this.reconnecting = false;
               } finally {
                 this.reconnecting = false;
               }
             }, delay);
           } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            logger.error('❌ Limite de tentativas de reconexão atingido. WhatsApp desconectado.');
-            logger.info('💡 Para reconectar, acesse a página de WhatsApp e escaneie o QR Code.');
+            logger.warn('⚠️ Limite de tentativas de reconexão atingido.');
+            logger.info('💡 WhatsApp desconectado. Para reconectar, acesse /whatsapp e escaneie o QR Code.');
+            logger.info('ℹ️ O servidor continua funcionando normalmente.');
             this.isConnected = false;
-            this.reconnectAttempts = 0; // 🔧 CORREÇÃO 9: Reset para próxima tentativa manual
+            this.reconnectAttempts = 0; // Reset para próxima tentativa manual
             this.emit('disconnected');
           } else {
+            logger.info('ℹ️ Conexão fechada sem necessidade de reconexão.');
             this.isConnected = false;
             this.emit('disconnected');
           }

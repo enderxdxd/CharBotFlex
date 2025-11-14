@@ -172,14 +172,22 @@ async function initializeServices() {
     // Injetar Socket.IO no WhatsAppManager
     whatsappManager.setSocketIO(io);
     
-    await whatsappManager.initialize();
+    // Tentar inicializar WhatsApp (não crashar se falhar)
+    try {
+      await whatsappManager.initialize();
+      logger.info('✅ WhatsApp Manager inicializado');
+    } catch (whatsappError) {
+      logger.warn('⚠️ Erro ao inicializar WhatsApp (servidor continua rodando):', whatsappError);
+      logger.info('💡 Você pode conectar o WhatsApp depois via /api/whatsapp/qr');
+    }
     
     // Iniciar job de auto-fechamento de conversas
     startConversationAutoCloseJob();
     
     logger.info('✅ Serviços inicializados com sucesso');
   } catch (error) {
-    logger.error('❌ Erro ao inicializar serviços:', error);
+    logger.error('❌ Erro ao inicializar serviços (servidor continua rodando):', error);
+    logger.info('💡 Algumas funcionalidades podem estar limitadas');
   }
 }
 
@@ -199,21 +207,119 @@ server.listen(PORT, async () => {
   await initializeServices();
 });
 
-// Tratamento de sinais do sistema
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM recebido, encerrando servidor...');
-  server.close(() => {
-    logger.info('Servidor encerrado');
-    process.exit(0);
+// ========================================
+// TRATAMENTO GLOBAL DE ERROS (ANTI-CRASH)
+// ========================================
+
+// Capturar erros não tratados (previne crash do Railway)
+process.on('uncaughtException', (error: Error) => {
+  logger.error('❌ Uncaught Exception (NÃO VAI CRASHAR):', {
+    message: error.message,
+    stack: error.stack,
+    name: error.name
+  });
+  
+  // Se for erro do Baileys/WebSocket, apenas logar
+  const isBaileysError = error.message?.includes('Stream Errored') ||
+                        error.message?.includes('Connection') ||
+                        error.message?.includes('WebSocket') ||
+                        error.stack?.includes('baileys');
+  
+  if (isBaileysError) {
+    logger.warn('⚠️ Erro do Baileys detectado - Servidor continua rodando');
+    logger.info('💡 O WhatsApp vai tentar reconectar automaticamente');
+    return; // NÃO crashar
+  }
+  
+  // Para outros erros críticos, logar mas também não crashar
+  logger.error('⚠️ Erro crítico detectado, mas servidor continua rodando');
+});
+
+// Capturar promises rejeitadas não tratadas
+process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
+  logger.error('❌ Unhandled Promise Rejection (NÃO VAI CRASHAR):', {
+    reason: reason?.message || reason,
+    stack: reason?.stack,
+    promise: promise.toString()
+  });
+  
+  // Se for erro do Baileys/WebSocket, apenas logar
+  const isBaileysError = reason?.message?.includes('Stream Errored') ||
+                        reason?.message?.includes('Connection') ||
+                        reason?.message?.includes('WebSocket') ||
+                        reason?.stack?.includes('baileys');
+  
+  if (isBaileysError) {
+    logger.warn('⚠️ Promise rejeitada do Baileys - Servidor continua rodando');
+    logger.info('💡 O WhatsApp vai tentar reconectar automaticamente');
+    return; // NÃO crashar
+  }
+  
+  logger.warn('⚠️ Promise rejeitada detectada, mas servidor continua rodando');
+});
+
+// Capturar avisos
+process.on('warning', (warning: Error) => {
+  logger.warn('⚠️ Node.js Warning:', {
+    name: warning.name,
+    message: warning.message,
+    stack: warning.stack
   });
 });
 
-process.on('SIGINT', () => {
-  logger.info('SIGINT recebido, encerrando servidor...');
-  server.close(() => {
-    logger.info('Servidor encerrado');
-    process.exit(0);
-  });
+// Tratamento de sinais do sistema (graceful shutdown)
+process.on('SIGTERM', async () => {
+  logger.info('🛑 SIGTERM recebido, encerrando servidor gracefully...');
+  
+  try {
+    // Fechar servidor HTTP
+    server.close(() => {
+      logger.info('✅ Servidor HTTP encerrado');
+    });
+    
+    // Desconectar WhatsApp
+    const whatsappManager = getWhatsAppManager();
+    await whatsappManager.disconnect();
+    logger.info('✅ WhatsApp desconectado');
+    
+    // Aguardar 2 segundos para finalizar operações
+    setTimeout(() => {
+      logger.info('👋 Servidor encerrado completamente');
+      process.exit(0);
+    }, 2000);
+  } catch (error) {
+    logger.error('❌ Erro ao encerrar servidor:', error);
+    process.exit(1);
+  }
 });
+
+process.on('SIGINT', async () => {
+  logger.info('🛑 SIGINT recebido, encerrando servidor gracefully...');
+  
+  try {
+    // Fechar servidor HTTP
+    server.close(() => {
+      logger.info('✅ Servidor HTTP encerrado');
+    });
+    
+    // Desconectar WhatsApp
+    const whatsappManager = getWhatsAppManager();
+    await whatsappManager.disconnect();
+    logger.info('✅ WhatsApp desconectado');
+    
+    // Aguardar 2 segundos para finalizar operações
+    setTimeout(() => {
+      logger.info('👋 Servidor encerrado completamente');
+      process.exit(0);
+    }, 2000);
+  } catch (error) {
+    logger.error('❌ Erro ao encerrar servidor:', error);
+    process.exit(1);
+  }
+});
+
+// Log de inicialização bem-sucedida
+logger.info('🛡️ Proteção anti-crash ativada');
+logger.info('✅ Erros do Baileys não vão derrubar o servidor');
 
 export { app, io };

@@ -216,8 +216,16 @@ export class MessageHandler {
 
       // Enviar resposta
       if (response.message) {
-        logger.info('📤 Enviando resposta do bot:', response.message.substring(0, 50));
-        await this.whatsappManager.sendMessage(phoneNumber, response.message);
+        logger.info('📤 Enviando resposta do bot para:', phoneNumber);
+        logger.info('📝 Mensagem:', response.message.substring(0, 100));
+        
+        try {
+          await this.whatsappManager.sendMessage(phoneNumber, response.message);
+          logger.info('✅ Mensagem enviada com sucesso via WhatsApp!');
+        } catch (sendError) {
+          logger.error('❌ ERRO ao enviar mensagem via WhatsApp:', sendError);
+          throw sendError;
+        }
       } else {
         // ⚠️ Flow não retornou mensagem - enviar fallback
         logger.warn('⚠️ Flow não retornou mensagem - enviando fallback');
