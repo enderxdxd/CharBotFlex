@@ -20,6 +20,9 @@ import * as schedulerController from '../controllers/scheduler.controller.js';
 import * as conversationController from '../controllers/conversation.controller.js';
 import * as testController from '../controllers/test.controller.js';
 
+// API Routes para integração externa
+import apiRoutes from './api.routes.js';
+
 const router = Router();
 
 // ==========================================
@@ -32,6 +35,11 @@ router.get('/health', (req: Request, res: Response) => {
     service: 'CharBotFlex Backend'
   });
 });
+
+// ==========================================
+// API EXTERNA (Integração com apps terceiros)
+// ==========================================
+router.use('/v1', apiRoutes);
 
 // ==========================================
 // ROTAS DE AUTENTICAÇÃO
