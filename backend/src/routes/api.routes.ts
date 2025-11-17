@@ -21,7 +21,10 @@ const validateRequired = (fields: string[], body: any) => {
 // ========================================
 // MIDDLEWARE DE AUTENTICAÇÃO (API KEY)
 // ========================================
+// ⚠️ DESABILITADO: API aberta para apps externos que não conseguem enviar headers customizados
+// Se precisar reativar no futuro, descomente o código abaixo e adicione authenticateApiKey nas rotas
 
+/*
 const authenticateApiKey = (req: any, res: any, next: any) => {
   const apiKey = req.headers['x-api-key'];
   
@@ -32,8 +35,6 @@ const authenticateApiKey = (req: any, res: any, next: any) => {
     });
   }
   
-  // TODO: Validar API Key no banco de dados
-  // Por enquanto, aceitar qualquer key (você deve implementar validação real)
   if (apiKey !== process.env.API_KEY) {
     return res.status(403).json({ 
       success: false, 
@@ -43,6 +44,7 @@ const authenticateApiKey = (req: any, res: any, next: any) => {
   
   next();
 };
+*/
 
 // ========================================
 // 1. ENVIAR MENSAGEM
@@ -62,7 +64,6 @@ const authenticateApiKey = (req: any, res: any, next: any) => {
  */
 router.post(
   '/messages/send',
-  authenticateApiKey,
   async (req, res) => {
     try {
       const { to, message, type = 'text', mediaUrl } = req.body;
@@ -132,7 +133,6 @@ router.post(
  */
 router.get(
   '/conversations',
-  authenticateApiKey,
   async (req, res) => {
     try {
       const { status, limit = 50, offset = 0 } = req.query;
@@ -188,7 +188,6 @@ router.get(
  */
 router.get(
   '/conversations/:id/messages',
-  authenticateApiKey,
   async (req, res) => {
     try {
       const { id } = req.params;
@@ -239,7 +238,6 @@ router.get(
  */
 router.post(
   '/webhook',
-  authenticateApiKey,
   async (req, res) => {
     try {
       const { event, data } = req.body;
@@ -273,7 +271,6 @@ router.post(
  */
 router.get(
   '/whatsapp/status',
-  authenticateApiKey,
   async (req, res) => {
     try {
       const whatsappManager = getWhatsAppManager();
@@ -319,7 +316,6 @@ router.get(
  */
 router.patch(
   '/conversations/:id/status',
-  authenticateApiKey,
   async (req, res) => {
     try {
       const { id } = req.params;
