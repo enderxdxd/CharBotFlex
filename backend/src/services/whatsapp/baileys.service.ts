@@ -351,17 +351,21 @@ export class BaileysService extends EventEmitter {
         statusCode === 409) {
       logger.error('🚫 ERRO "CAN\'T LINK DEVICES" ou CONFLICT DETECTADO!');
       logger.error('💡 Causa provável: Múltiplas tentativas de conexão simultâneas');
-      logger.error('💡 Solução: Aguarde 2-3 minutos antes de tentar novamente');
+      logger.error('💡 Solução: Aguarde 3 minutos (180s) antes de tentar novamente');
       logger.error('💡 IMPORTANTE: Escaneie o QR Code apenas UMA VEZ');
       
       this.isInitializing = false;
       this.isConnected = false;
       this.reconnectAttempts = 0;
+      this.reconnecting = false;
+      
+      // 🔧 CRÍTICO: Registrar tentativa falhada para forçar cooldown
+      this.lastConnectionAttempt = new Date();
       
       // Limpar sessão corrompida
       await this.clearCorruptedSession();
       
-      this.emit('error', new Error('can\'t link devices - Aguarde 2-3 minutos antes de tentar novamente'));
+      this.emit('error', new Error('can\'t link devices - Aguarde 3 minutos (180s) antes de tentar novamente'));
       return;
     }
     
@@ -393,6 +397,20 @@ export class BaileysService extends EventEmitter {
       return;
     }
 
+    // 🔧 CRÍTICO: Verificar cooldown antes de reconectar
+    if (this.lastConnectionAttempt) {
+      const timeSinceLastAttempt = Date.now() - this.lastConnectionAttempt.getTime();
+      if (timeSinceLastAttempt < this.MIN_TIME_BETWEEN_ATTEMPTS) {
+        const waitTime = this.MIN_TIME_BETWEEN_ATTEMPTS - timeSinceLastAttempt;
+        const waitSeconds = Math.round(waitTime / 1000);
+        logger.error(`🚫 COOLDOWN ATIVO: Não é possível reconectar. Aguarde ${waitSeconds}s`);
+        this.reconnectAttempts = 0;
+        this.reconnecting = false;
+        this.emit('disconnected');
+        return;
+      }
+    }
+    
     if (shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
       await this.scheduleReconnect();
     } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
@@ -436,6 +454,18 @@ export class BaileysService extends EventEmitter {
       return;
     }
     
+    // 🔧 CRÍTICO: Verificar cooldown antes de agendar reconexão
+    if (this.lastConnectionAttempt) {
+      const timeSinceLastAttempt = Date.now() - this.lastConnectionAttempt.getTime();
+      if (timeSinceLastAttempt < this.MIN_TIME_BETWEEN_ATTEMPTS) {
+        const waitTime = this.MIN_TIME_BETWEEN_ATTEMPTS - timeSinceLastAttempt;
+        const waitSeconds = Math.round(waitTime / 1000);
+        logger.error(`🚫 COOLDOWN ATIVO: Reconexão bloqueada. Aguarde ${waitSeconds}s`);
+        this.reconnecting = false;
+        return;
+      }
+    }
+    
     this.reconnecting = true;
     this.reconnectAttempts++;
     this.stats.reconnections++;
@@ -451,8 +481,15 @@ export class BaileysService extends EventEmitter {
     this.reconnectTimeout = setTimeout(async () => {
       try {
         await this.initialize();
-      } catch (error) {
+      } catch (error: any) {
         logger.error('❌ Erro na reconexão:', error);
+        
+        // 🔧 NOVO: Se for erro "can't link devices", não tentar novamente
+        if (error?.message?.includes('can\'t link devices') || 
+            error?.message?.includes('Aguarde')) {
+          logger.error('🚫 Reconexão automática desabilitada devido a cooldown');
+          this.reconnectAttempts = 0;
+        }
       } finally {
         this.reconnecting = false;
       }
@@ -866,6 +903,16 @@ export class BaileysService extends EventEmitter {
               logger.error('❌ Conexão perdida!');
               this.isConnected = false;
               this.connectionLostCount = 0;
+              
+              // 🔧 CRÍTICO: Verificar cooldown antes de reconectar
+              if (this.lastConnectionAttempt) {
+                const timeSinceLastAttempt = Date.now() - this.lastConnectionAttempt.getTime();
+                if (timeSinceLastAttempt < this.MIN_TIME_BETWEEN_ATTEMPTS) {
+                  logger.error('🚫 COOLDOWN ATIVO: Health check não pode reconectar');
+                  return;
+                }
+              }
+              
               this.initialize().catch(err => {
                 logger.error('Erro ao reconectar:', err);
               });
@@ -877,6 +924,15 @@ export class BaileysService extends EventEmitter {
           if (this.reconnecting || this.isInitializing) {
             this.reconnecting = false;
             this.isInitializing = false;
+          }
+          
+          // 🔧 CRÍTICO: Verificar cooldown antes de reconectar
+          if (this.lastConnectionAttempt) {
+            const timeSinceLastAttempt = Date.now() - this.lastConnectionAttempt.getTime();
+            if (timeSinceLastAttempt < this.MIN_TIME_BETWEEN_ATTEMPTS) {
+              logger.error('🚫 COOLDOWN ATIVO: Health check não pode reconectar');
+              return;
+            }
           }
           
           this.reconnecting = true;
