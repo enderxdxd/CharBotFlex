@@ -678,6 +678,19 @@ export class BaileysService extends EventEmitter {
       try {
         logger.info('🔌 [forceNewQR] Desconectando sessão anterior...');
         
+        // 🔧 CRÍTICO: Fechar WebSocket primeiro
+        if (this.sock.ws) {
+          try {
+            logger.info('🔌 [forceNewQR] Fechando WebSocket...');
+            this.sock.ws.close();
+            // Aguardar WebSocket fechar completamente
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            logger.info('✅ [forceNewQR] WebSocket fechado');
+          } catch (wsError) {
+            logger.warn('⚠️ [forceNewQR] Erro ao fechar WebSocket:', wsError);
+          }
+        }
+        
         // Remover listeners específicos
         this.sock.ev.removeAllListeners('connection.update');
         this.sock.ev.removeAllListeners('creds.update');
@@ -720,8 +733,9 @@ export class BaileysService extends EventEmitter {
         logger.info('ℹ️ [forceNewQR] Nenhuma sessão anterior encontrada');
       }
       
-      // Aguardar um pouco para garantir que arquivos foram removidos
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // 🔧 CRÍTICO: Aguardar 3 segundos para WhatsApp liberar a sessão
+      logger.info('⏳ [forceNewQR] Aguardando 3s para WhatsApp liberar sessão...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
       
     } catch (error: any) {
       logger.error('❌ [forceNewQR] Erro ao remover sessão:', error?.message || error);
