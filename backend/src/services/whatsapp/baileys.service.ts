@@ -42,7 +42,7 @@ export class BaileysService extends EventEmitter {
   private keepAliveInterval: NodeJS.Timeout | null = null;
   private lastKeepAlive: Date = new Date();
   
-  // 🔧 NOVO: Fila de mensagens pendentes
+  // Fila de mensagens pendentes
   private messageQueue: Array<{
     phoneNumber: string;
     text: string;
@@ -52,19 +52,39 @@ export class BaileysService extends EventEmitter {
   }> = [];
   private isProcessingQueue: boolean = false;
   
-  // 🔧 NOVO: Contadores para monitoramento
+  // Estatísticas
   private stats = {
     messagesSent: 0,
     messagesFailed: 0,
     reconnections: 0,
     lastError: null as string | null,
   };
+  
+  // 🔧 NOVO: Controle de instância única
+  private static instance: BaileysService | null = null;
+  private isDisposed: boolean = false;
+  
+  // 🔧 NOVO: Controle de pairing
+  private pairingCode: string | null = null;
+  private lastQRTime: Date | null = null;
+  private qrAttempts: number = 0;
+  private maxQRAttempts: number = 3;
 
   constructor() {
     super();
+    
+    // 🔧 CRÍTICO: Prevenir múltiplas instâncias
+    if (BaileysService.instance && !BaileysService.instance.isDisposed) {
+      logger.warn('⚠️ Tentativa de criar múltiplas instâncias do BaileysService!');
+      logger.warn('⚠️ Retornando instância existente...');
+      return BaileysService.instance;
+    }
+    
     this.sessionPath = process.env.BAILEYS_SESSION_PATH || '/data/baileys_sessions';
     logger.info(`📁 Session path: ${this.sessionPath}`);
     this.ensureSessionDirectory();
+    
+    BaileysService.instance = this;
   }
 
   private ensureSessionDirectory(): void {
@@ -79,9 +99,12 @@ export class BaileysService extends EventEmitter {
   }
 
   async initialize() {
+    if (this.isDisposed) {
+      throw new Error('BaileysService foi descartado. Crie uma nova instância.');
+    }
+
     if (this.isInitializing) {
       logger.warn('⚠️  Inicialização já em andamento, aguardando...');
-      // Aguardar até inicialização terminar (max 30s)
       const maxWait = 30000;
       const startWait = Date.now();
       while (this.isInitializing && (Date.now() - startWait) < maxWait) {
@@ -93,6 +116,16 @@ export class BaileysService extends EventEmitter {
     if (this.isConnected && this.sock && this.isWebSocketOpen()) {
       logger.info('✅ Socket já conectado e WebSocket aberto');
       return;
+    }
+
+    // 🔧 CRÍTICO: Se está tentando reconectar muito rápido após "can't link devices"
+    if (this.lastQRTime) {
+      const timeSinceLastQR = Date.now() - this.lastQRTime.getTime();
+      if (timeSinceLastQR < 60000) { // Menos de 1 minuto
+        const waitTime = 60000 - timeSinceLastQR;
+        logger.warn(`⚠️ Aguardando ${Math.round(waitTime/1000)}s antes de tentar reconectar (prevenção "can't link devices")`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
     }
 
     if (this.reconnectTimeout) {
@@ -111,38 +144,60 @@ export class BaileysService extends EventEmitter {
         logger.info('✅ Módulo Baileys carregado');
       }
       
+      // 🔧 CRÍTICO: Limpar socket anterior COMPLETAMENTE
       if (this.sock) {
         await this.cleanupSocket();
+        // Aguardar 2 segundos após cleanup
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
       
       const sessionDir = path.join(this.sessionPath, 'session');
+      
+      // 🔧 NOVO: Verificar se sessão existe
+      const sessionExists = fs.existsSync(sessionDir) && 
+                           fs.readdirSync(sessionDir).length > 0;
+      
+      if (sessionExists) {
+        logger.info('📂 Sessão anterior encontrada, tentando restaurar...');
+      } else {
+        logger.info('📂 Nenhuma sessão anterior, será necessário escanear QR Code');
+      }
+      
       const { state, saveCreds } = await this.baileys.useMultiFileAuthState(sessionDir);
 
       const { version } = await this.baileys.fetchLatestBaileysVersion();
       logger.info(`📦 Versão do Baileys: ${version.join('.')}`);
 
+      // 🔧 CRÍTICO: Configurações mais conservadoras para evitar "can't link devices"
       this.sock = this.baileys.default({
         auth: state,
-        printQRInTerminal: true,
+        printQRInTerminal: false, // Desabilitar QR no terminal para controle manual
         version,
-        defaultQueryTimeoutMs: 120000,
-        connectTimeoutMs: 120000,
-        keepAliveIntervalMs: 10000,
-        retryRequestDelayMs: 350,
-        maxMsgRetryCount: 10,
+        defaultQueryTimeoutMs: 60000, // Reduzido para 1 minuto
+        connectTimeoutMs: 60000, // Reduzido para 1 minuto
+        keepAliveIntervalMs: 25000, // Aumentado para 25s (mais conservador)
+        retryRequestDelayMs: 500, // Aumentado delay entre retries
+        maxMsgRetryCount: 5, // Reduzido para evitar spam
         getMessage: async () => undefined,
-        markOnlineOnConnect: true,
+        markOnlineOnConnect: false, // 🔧 CRÍTICO: Não marcar online imediatamente
         syncFullHistory: false,
         browser: this.baileys.Browsers.ubuntu('Chrome'),
-        qrTimeout: 120000,
+        qrTimeout: 60000, // Reduzido para 1 minuto
         emitOwnEvents: false,
         shouldIgnoreJid: (jid: string) => jid.endsWith('@broadcast'),
+        // 🔧 NOVO: Configurações para evitar múltiplas conexões
+        generateHighQualityLinkPreview: false,
+        patchMessageBeforeSending: (message) => {
+          // Não modificar mensagens
+          return message;
+        },
       });
 
       this.setupWebSocketHandlers();
       
       this.sock.ev.on('error' as any, (error: any) => {
-        logger.warn('⚠️ Socket error event (tratado):', error.message);
+        logger.warn('⚠️ Socket error event:', error.message);
+        this.stats.lastError = error.message;
       });
 
       this.sock.ev.on('connection.update', async (update) => {
@@ -166,12 +221,32 @@ export class BaileysService extends EventEmitter {
           this.isInitializing = false;
           logger.info('⏱️  Timeout de inicialização');
         }
-      }, 10000);
+      }, 15000); // Aumentado para 15s
 
-    } catch (error) {
+    } catch (error: any) {
       this.isInitializing = false;
       this.reconnecting = false;
       logger.error('❌ Erro ao inicializar Baileys:', error);
+      
+      // 🔧 NOVO: Detectar erro "can't link devices"
+      if (error?.message?.includes('can\'t link devices') || 
+          error?.message?.includes('Conflict') ||
+          error?.output?.statusCode === 428) {
+        logger.error('🚫 ERRO "CAN\'T LINK DEVICES" DETECTADO!');
+        logger.error('💡 SOLUÇÃO: Aguarde 2-3 minutos antes de tentar novamente');
+        logger.error('💡 CAUSA: Múltiplas tentativas de conexão muito rápidas');
+        
+        this.qrAttempts++;
+        
+        if (this.qrAttempts >= this.maxQRAttempts) {
+          logger.error('❌ Muitas tentativas falhas. Aguarde 5 minutos antes de tentar novamente.');
+          this.qrAttempts = 0;
+          throw new Error('Muitas tentativas de conexão. Aguarde 5 minutos e tente escanear o QR Code novamente.');
+        }
+        
+        throw new Error('WhatsApp bloqueou temporariamente novas conexões. Aguarde 2-3 minutos e tente novamente.');
+      }
+      
       throw error;
     }
   }
@@ -187,15 +262,11 @@ export class BaileysService extends EventEmitter {
     this.sock.ws.on('close', (code: number, reason: string) => {
       logger.info(`🔌 WebSocket fechado: code=${code}, reason=${reason || 'sem motivo'}`);
       this.isConnected = false;
-      
-      // 🔧 CRÍTICO: Processar fila de mensagens pendentes como falha
       this.clearMessageQueue('WebSocket fechado');
     });
 
     this.sock.ws.on('open', () => {
       logger.info('🔌 WebSocket aberto');
-      
-      // 🔧 NOVO: Processar fila quando WebSocket abre
       this.processMessageQueue();
     });
   }
@@ -212,8 +283,11 @@ export class BaileysService extends EventEmitter {
     });
 
     if (qr) {
+      this.lastQRTime = new Date();
       this.qrCode = await QRCode.toDataURL(qr);
       logger.info('📱 QR Code gerado - Aguardando pareamento...');
+      logger.info('⚠️  IMPORTANTE: Escaneie o QR Code UMA VEZ e aguarde conectar');
+      logger.info('⚠️  NÃO escaneie múltiplas vezes ou terá erro "can\'t link devices"');
       this.emit('qr', this.qrCode);
     }
 
@@ -223,12 +297,35 @@ export class BaileysService extends EventEmitter {
       await this.handleConnectionOpen(isNewLogin);
     } else if (connection === 'connecting') {
       logger.info('🔄 Conectando ao WhatsApp...');
+      logger.info('⏳ Aguardando resposta do servidor WhatsApp...');
     }
   }
 
   private async handleConnectionClose(lastDisconnect: any): Promise<void> {
     const err = lastDisconnect?.error as any;
     const statusCode = err?.output?.statusCode;
+    
+    // 🔧 CRÍTICO: Detectar "can't link devices" ou Conflict
+    if (statusCode === 428 || 
+        err?.message?.includes('can\'t link devices') ||
+        err?.message?.includes('Conflict') ||
+        statusCode === 409) {
+      logger.error('🚫 ERRO "CAN\'T LINK DEVICES" ou CONFLICT DETECTADO!');
+      logger.error('💡 Causa provável: Múltiplas tentativas de conexão simultâneas');
+      logger.error('💡 Solução: Aguarde 2-3 minutos antes de tentar novamente');
+      logger.error('💡 IMPORTANTE: Escaneie o QR Code apenas UMA VEZ');
+      
+      this.isInitializing = false;
+      this.isConnected = false;
+      this.reconnectAttempts = 0;
+      
+      // Limpar sessão corrompida
+      await this.clearCorruptedSession();
+      
+      this.emit('error', new Error('can\'t link devices - Aguarde 2-3 minutos antes de tentar novamente'));
+      return;
+    }
+    
     const shouldReconnect = statusCode !== this.baileys!.DisconnectReason.loggedOut;
 
     const isStreamError = err?.message?.includes('Stream Errored') || 
@@ -248,8 +345,6 @@ export class BaileysService extends EventEmitter {
 
     this.isInitializing = false;
     this.isConnected = false;
-    
-    // 🔧 Limpar fila de mensagens
     this.clearMessageQueue('Conexão fechada');
 
     if (statusCode === this.baileys!.DisconnectReason.loggedOut) {
@@ -262,11 +357,37 @@ export class BaileysService extends EventEmitter {
     if (shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
       await this.scheduleReconnect();
     } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      logger.warn('⚠️ Limite de tentativas de reconexão atingido.');
+      logger.warn('⚠️ Limite de reconexões atingido');
       this.reconnectAttempts = 0;
       this.emit('disconnected');
     } else {
       this.emit('disconnected');
+    }
+  }
+
+  // 🔧 NOVO: Limpar sessão corrompida
+  private async clearCorruptedSession(): Promise<void> {
+    logger.info('🗑️ Limpando sessão corrompida...');
+    
+    const sessionDir = path.join(this.sessionPath, 'session');
+    
+    try {
+      if (fs.existsSync(sessionDir)) {
+        // Fazer backup da sessão antes de deletar
+        const backupDir = path.join(this.sessionPath, `session_backup_${Date.now()}`);
+        try {
+          fs.cpSync(sessionDir, backupDir, { recursive: true });
+          logger.info(`📦 Backup da sessão criado em: ${backupDir}`);
+        } catch (backupError) {
+          logger.warn('⚠️ Não foi possível fazer backup da sessão');
+        }
+        
+        // Deletar sessão corrompida
+        fs.rmSync(sessionDir, { recursive: true, force: true });
+        logger.info('✅ Sessão corrompida removida');
+      }
+    } catch (error) {
+      logger.error('❌ Erro ao limpar sessão:', error);
     }
   }
 
@@ -280,9 +401,10 @@ export class BaileysService extends EventEmitter {
     this.reconnectAttempts++;
     this.stats.reconnections++;
     
+    // 🔧 CRÍTICO: Backoff mais agressivo para evitar "can't link devices"
     const delay = Math.min(
-      this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1),
-      30000
+      this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1), // Backoff exponencial de 2x
+      120000 // Máximo 2 minutos
     );
     
     logger.info(`🔄 Reconectando (${this.reconnectAttempts}/${this.maxReconnectAttempts}) em ${Math.round(delay/1000)}s...`);
@@ -302,21 +424,26 @@ export class BaileysService extends EventEmitter {
     this.isConnected = true;
     this.qrCode = null;
     this.reconnectAttempts = 0;
+    this.qrAttempts = 0; // Reset QR attempts
     this.isInitializing = false;
     this.lastMessageTime = new Date();
     this.connectionLostCount = 0;
     
     if (isNewLogin) {
       logger.info('✅ Baileys conectado! (NOVO LOGIN)');
+      logger.info('📱 Dispositivo pareado com sucesso');
     } else {
       logger.info('✅ Baileys conectado! (SESSÃO RESTAURADA)');
+      logger.info('🎉 Não é necessário escanear QR Code novamente!');
     }
     
     this.emit('connected');
+    
+    // 🔧 Aguardar 3 segundos antes de iniciar health check e processar fila
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
     this.startHealthCheck();
     this.startKeepAlive();
-    
-    // 🔧 CRÍTICO: Processar fila de mensagens pendentes
     await this.processMessageQueue();
   }
 
@@ -382,28 +509,24 @@ export class BaileysService extends EventEmitter {
     return typeMap[type] || 'text';
   }
 
-  // 🔧 NOVO: Verificar se WebSocket está realmente aberto
   private isWebSocketOpen(): boolean {
     if (!this.sock?.ws) return false;
     
     try {
       const readyState = (this.sock.ws as any).readyState;
-      return readyState === 1; // 1 = OPEN
+      return readyState === 1;
     } catch (error) {
       return false;
     }
   }
 
-  // 🔧 NOVO: Verificar e garantir conexão antes de enviar
   private async ensureConnection(): Promise<boolean> {
-    // Se não tem socket, tentar inicializar
     if (!this.sock) {
       logger.warn('⚠️ Socket não existe, tentando inicializar...');
       
       if (!this.isInitializing && !this.reconnecting) {
         try {
           await this.initialize();
-          // Aguardar até 10s para conexão estabelecer
           const maxWait = 10000;
           const startWait = Date.now();
           while (!this.isConnected && (Date.now() - startWait) < maxWait) {
@@ -416,18 +539,15 @@ export class BaileysService extends EventEmitter {
       }
     }
 
-    // Verificar se está conectado e WebSocket está aberto
     if (!this.isConnected || !this.isWebSocketOpen()) {
       logger.warn('⚠️ Não conectado ou WebSocket não está aberto');
       
-      // Se não está inicializando nem reconectando, tentar reconectar
       if (!this.isInitializing && !this.reconnecting) {
         logger.info('🔄 Tentando reconectar...');
         this.isConnected = false;
         
         try {
           await this.initialize();
-          // Aguardar até 10s
           const maxWait = 10000;
           const startWait = Date.now();
           while (!this.isConnected && (Date.now() - startWait) < maxWait) {
@@ -444,13 +564,11 @@ export class BaileysService extends EventEmitter {
   }
 
   async sendTextMessage(phoneNumber: string, text: string, retryCount: number = 0): Promise<void> {
-    // 🔧 CRÍTICO: Verificar e garantir conexão ANTES de tentar enviar
     const isConnected = await this.ensureConnection();
     
     if (!isConnected) {
-      logger.warn('⚠️ Não foi possível estabelecer conexão, adicionando à fila...');
+      logger.warn('⚠️ Não conectado, adicionando à fila...');
       
-      // Adicionar à fila para processar quando conectar
       return new Promise((resolve, reject) => {
         this.messageQueue.push({
           phoneNumber,
@@ -460,24 +578,22 @@ export class BaileysService extends EventEmitter {
           timestamp: new Date(),
         });
         
-        logger.info(`📥 Mensagem adicionada à fila (${this.messageQueue.length} pendentes)`);
+        logger.info(`📥 Mensagem na fila (${this.messageQueue.length} pendentes)`);
         
-        // Timeout de 60 segundos para mensagem na fila
         setTimeout(() => {
           const index = this.messageQueue.findIndex(
             m => m.phoneNumber === phoneNumber && m.text === text
           );
           if (index >= 0) {
             const msg = this.messageQueue.splice(index, 1)[0];
-            msg.reject(new Error('Timeout: Conexão não estabelecida em 60s'));
+            msg.reject(new Error('Timeout: Não conectado em 60s'));
           }
         }, 60000);
       });
     }
 
-    // Verificação final de segurança
     if (!this.sock || !this.sock.ws) {
-      throw new Error('Socket ou WebSocket indisponível após ensureConnection');
+      throw new Error('Socket ou WebSocket indisponível');
     }
 
     const wsReadyState = (this.sock.ws as any).readyState;
@@ -492,7 +608,7 @@ export class BaileysService extends EventEmitter {
       
       await this.sock.sendMessage(jid, { text });
       
-      logger.info(`✅ Mensagem enviada com sucesso`);
+      logger.info(`✅ Mensagem enviada`);
       this.lastMessageTime = new Date();
       this.stats.messagesSent++;
     } catch (error: any) {
@@ -512,7 +628,7 @@ export class BaileysService extends EventEmitter {
         error?.code === 'EPIPE';
       
       if (isConnectionError && retryCount < 2) {
-        logger.warn(`🔄 Erro de conexão, retry ${retryCount + 1}/2...`);
+        logger.warn(`🔄 Retry ${retryCount + 1}/2...`);
         this.isConnected = false;
         
         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -524,7 +640,6 @@ export class BaileysService extends EventEmitter {
     }
   }
 
-  // 🔧 NOVO: Processar fila de mensagens pendentes
   private async processMessageQueue(): Promise<void> {
     if (this.isProcessingQueue || this.messageQueue.length === 0) {
       return;
@@ -536,7 +651,7 @@ export class BaileysService extends EventEmitter {
     }
 
     this.isProcessingQueue = true;
-    logger.info(`📤 Processando fila de mensagens (${this.messageQueue.length} pendentes)...`);
+    logger.info(`📤 Processando fila (${this.messageQueue.length} pendentes)...`);
 
     while (this.messageQueue.length > 0 && this.isConnected && this.isWebSocketOpen()) {
       const message = this.messageQueue.shift();
@@ -545,25 +660,23 @@ export class BaileysService extends EventEmitter {
       try {
         await this.sendTextMessage(message.phoneNumber, message.text);
         message.resolve();
-        logger.info(`✅ Mensagem da fila enviada para ${message.phoneNumber}`);
+        logger.info(`✅ Mensagem da fila enviada`);
       } catch (error) {
         message.reject(error);
-        logger.error(`❌ Falha ao enviar mensagem da fila:`, error);
+        logger.error(`❌ Falha ao enviar da fila:`, error);
       }
 
-      // Pequeno delay entre mensagens para não sobrecarregar
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
     this.isProcessingQueue = false;
-    logger.info(`✅ Fila processada (${this.messageQueue.length} restantes)`);
+    logger.info(`✅ Fila processada`);
   }
 
-  // 🔧 NOVO: Limpar fila de mensagens
   private clearMessageQueue(reason: string): void {
     if (this.messageQueue.length === 0) return;
 
-    logger.warn(`⚠️ Limpando fila de ${this.messageQueue.length} mensagens: ${reason}`);
+    logger.warn(`⚠️ Limpando fila: ${reason}`);
     
     for (const message of this.messageQueue) {
       message.reject(new Error(`Fila limpa: ${reason}`));
@@ -597,7 +710,7 @@ export class BaileysService extends EventEmitter {
 
       await this.sock.sendMessage(jid, message);
       
-      logger.info(`✅ Mídia ${type} enviada para ${phoneNumber}`);
+      logger.info(`✅ Mídia enviada`);
       this.lastMessageTime = new Date();
       this.stats.messagesSent++;
     } catch (error) {
@@ -648,13 +761,13 @@ export class BaileysService extends EventEmitter {
     return this.isConnected && this.isWebSocketOpen();
   }
 
-  // 🔧 NOVO: Obter estatísticas
   getStats() {
     return {
       ...this.stats,
       isConnected: this.isConnected,
       queueSize: this.messageQueue.length,
       uptime: Date.now() - this.lastMessageTime.getTime(),
+      qrAttempts: this.qrAttempts,
     };
   }
 
@@ -663,7 +776,7 @@ export class BaileysService extends EventEmitter {
       clearInterval(this.keepAliveInterval);
     }
 
-    logger.info('💓 Iniciando keep-alive (a cada 2 min)');
+    logger.info('💓 Iniciando keep-alive');
 
     this.keepAliveInterval = setInterval(async () => {
       if (!this.isConnected || !this.sock) {
@@ -674,13 +787,9 @@ export class BaileysService extends EventEmitter {
         try {
           await this.sock.sendPresenceUpdate('available');
           this.lastKeepAlive = new Date();
-          logger.info('💓 Keep-alive enviado');
         } catch (error: any) {
           logger.warn('⚠️ Erro no keep-alive:', error?.message);
         }
-      } else {
-        logger.warn('⚠️ Keep-alive: WebSocket fechado');
-        this.isConnected = false;
       }
     }, 120000);
   }
@@ -704,10 +813,7 @@ export class BaileysService extends EventEmitter {
       const timeSinceLastMessage = now.getTime() - this.lastMessageTime.getTime();
       const minutesSinceLastMessage = Math.floor(timeSinceLastMessage / 60000);
 
-      logger.info(`🏥 Health: ${this.isConnected ? 'OK' : 'DOWN'} | Atividade: ${minutesSinceLastMessage}min | Fila: ${this.messageQueue.length}`);
-
       if (this.isConnected && timeSinceLastMessage > 300000) {
-        logger.warn('⚠️ Sem atividade há 5+ min, verificando...');
         
         if (this.isWebSocketOpen()) {
           try {
@@ -718,7 +824,7 @@ export class BaileysService extends EventEmitter {
             this.connectionLostCount++;
             
             if (this.connectionLostCount >= 3) {
-              logger.error('❌ Conexão perdida! Reconectando...');
+              logger.error('❌ Conexão perdida!');
               this.isConnected = false;
               this.connectionLostCount = 0;
               this.initialize().catch(err => {
@@ -727,7 +833,6 @@ export class BaileysService extends EventEmitter {
             }
           }
         } else {
-          logger.warn('⚠️ WebSocket fechado');
           this.isConnected = false;
           
           if (this.reconnecting || this.isInitializing) {
@@ -761,7 +866,7 @@ export class BaileysService extends EventEmitter {
       if (this.sock.ws) {
         try {
           this.sock.ws.close();
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Aumentado para 2s
         } catch (error) {
           logger.warn('⚠️ Erro ao fechar WebSocket:', error);
         }
@@ -807,6 +912,15 @@ export class BaileysService extends EventEmitter {
   async forceNewQR(): Promise<string> {
     logger.info('🔄 [forceNewQR] Gerando novo QR Code...');
     
+    // 🔧 CRÍTICO: Verificar tempo desde último QR
+    if (this.lastQRTime) {
+      const timeSinceLastQR = Date.now() - this.lastQRTime.getTime();
+      if (timeSinceLastQR < 120000) { // Menos de 2 minutos
+        const waitTime = 120000 - timeSinceLastQR;
+        throw new Error(`Aguarde ${Math.round(waitTime/1000)}s antes de gerar novo QR Code (prevenção "can't link devices")`);
+      }
+    }
+    
     if (this.isInitializing) {
       this.isInitializing = false;
       this.reconnecting = false;
@@ -844,7 +958,9 @@ export class BaileysService extends EventEmitter {
         logger.info('✅ Sessão removida');
       }
       
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // 🔧 CRÍTICO: Aguardar 5 segundos após remover sessão
+      logger.info('⏳ Aguardando 5s...');
+      await new Promise(resolve => setTimeout(resolve, 5000));
       
     } catch (error: any) {
       logger.error('❌ Erro ao remover sessão:', error?.message);
@@ -867,7 +983,12 @@ export class BaileysService extends EventEmitter {
       logger.error('❌ Erro ao inicializar:', error?.message);
       this.isInitializing = false;
       this.reconnecting = false;
-      throw new Error('Falha ao inicializar WhatsApp');
+      
+      if (error?.message?.includes('can\'t link devices')) {
+        throw new Error('WhatsApp bloqueou temporariamente. Aguarde 2-3 minutos e tente novamente.');
+      }
+      
+      throw error;
     }
     
     return new Promise<string>((resolve, reject) => {
@@ -906,12 +1027,28 @@ export class BaileysService extends EventEmitter {
         reject(new Error('Desconectado antes de gerar QR'));
       };
       
+      const errorListener = (error: Error) => {
+        if (resolved) return;
+        resolved = true;
+        
+        if (this.qrTimeout) {
+          clearTimeout(this.qrTimeout);
+          this.qrTimeout = null;
+        }
+        
+        this.isInitializing = false;
+        reject(error);
+      };
+      
       this.once('qr', qrListener);
       this.once('disconnected', disconnectListener);
+      this.once('error', errorListener);
     });
   }
 
   cleanup(): void {
+    this.isDisposed = true;
+    
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
@@ -924,5 +1061,7 @@ export class BaileysService extends EventEmitter {
     this.stopKeepAlive();
     this.clearMessageQueue('Cleanup');
     this.removeAllListeners();
+    
+    BaileysService.instance = null;
   }
 }
