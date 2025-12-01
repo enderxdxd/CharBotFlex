@@ -64,11 +64,15 @@ export class BaileysService extends EventEmitter {
   private static instance: BaileysService | null = null;
   private isDisposed: boolean = false;
   
-  // 🔧 NOVO: Controle de pairing
+  // 🔧 NOVO: Controle de pairing e prevenção "can't link devices"
   private pairingCode: string | null = null;
   private lastQRTime: Date | null = null;
+  private lastConnectionAttempt: Date | null = null;
   private qrAttempts: number = 0;
   private maxQRAttempts: number = 3;
+  private readonly MIN_TIME_BETWEEN_ATTEMPTS = 180000; // 3 minutos
+  private readonly MIN_TIME_BETWEEN_QR = 120000; // 2 minutos
+  private sessionLocked: boolean = false;
 
   constructor() {
     super();
@@ -103,6 +107,11 @@ export class BaileysService extends EventEmitter {
       throw new Error('BaileysService foi descartado. Crie uma nova instância.');
     }
 
+    // 🔧 CRÍTICO: Verificar se sessão está bloqueada
+    if (this.sessionLocked) {
+      throw new Error('Sessão bloqueada. Aguarde alguns minutos antes de tentar novamente.');
+    }
+
     if (this.isInitializing) {
       logger.warn('⚠️  Inicialização já em andamento, aguardando...');
       const maxWait = 30000;
@@ -113,20 +122,25 @@ export class BaileysService extends EventEmitter {
       return;
     }
 
-    if (this.isConnected && this.sock && this.isWebSocketOpen()) {
-      logger.info('✅ Socket já conectado e WebSocket aberto');
+    if (this.isConnected) {
+      logger.info('✅ Já conectado');
       return;
     }
 
-    // 🔧 CRÍTICO: Se está tentando reconectar muito rápido após "can't link devices"
-    if (this.lastQRTime) {
-      const timeSinceLastQR = Date.now() - this.lastQRTime.getTime();
-      if (timeSinceLastQR < 60000) { // Menos de 1 minuto
-        const waitTime = 60000 - timeSinceLastQR;
-        logger.warn(`⚠️ Aguardando ${Math.round(waitTime/1000)}s antes de tentar reconectar (prevenção "can't link devices")`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
+    // 🔧 CRÍTICO: Cooldown obrigatório entre tentativas de conexão
+    if (this.lastConnectionAttempt) {
+      const timeSinceLastAttempt = Date.now() - this.lastConnectionAttempt.getTime();
+      if (timeSinceLastAttempt < this.MIN_TIME_BETWEEN_ATTEMPTS) {
+        const waitTime = this.MIN_TIME_BETWEEN_ATTEMPTS - timeSinceLastAttempt;
+        const waitSeconds = Math.round(waitTime / 1000);
+        logger.error(`🚫 COOLDOWN ATIVO: Aguarde ${waitSeconds}s antes de tentar conectar novamente`);
+        logger.error('💡 Isso previne o erro "can\'t link devices" do WhatsApp');
+        throw new Error(`Aguarde ${waitSeconds} segundos antes de tentar conectar novamente (prevenção "can't link devices")`);
       }
     }
+
+    // Registrar tentativa de conexão
+    this.lastConnectionAttempt = new Date();
 
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
@@ -146,16 +160,42 @@ export class BaileysService extends EventEmitter {
       
       // 🔧 CRÍTICO: Limpar socket anterior COMPLETAMENTE
       if (this.sock) {
+        logger.info('🧹 Limpando socket anterior...');
         await this.cleanupSocket();
-        // Aguardar 2 segundos após cleanup
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        logger.info('⏳ Aguardando 3s após cleanup...');
+        await new Promise(resolve => setTimeout(resolve, 3000));
       }
       
       const sessionDir = path.join(this.sessionPath, 'session');
       
-      // 🔧 NOVO: Verificar se sessão existe
+      // 🔧 CRÍTICO: Verificar se sessão existe e está válida
       const sessionExists = fs.existsSync(sessionDir) && 
                            fs.readdirSync(sessionDir).length > 0;
+      
+      // 🔧 NOVO: Verificar lock de sessão (indica tentativa recente)
+      const lockFile = path.join(sessionDir, '.lock');
+      if (fs.existsSync(lockFile)) {
+        const lockTime = fs.statSync(lockFile).mtime.getTime();
+        const timeSinceLock = Date.now() - lockTime;
+        
+        if (timeSinceLock < this.MIN_TIME_BETWEEN_ATTEMPTS) {
+          const waitTime = this.MIN_TIME_BETWEEN_ATTEMPTS - timeSinceLock;
+          const waitSeconds = Math.round(waitTime / 1000);
+          logger.error(`🔒 Sessão bloqueada! Aguarde ${waitSeconds}s`);
+          throw new Error(`Sessão em uso recentemente. Aguarde ${waitSeconds}s (prevenção "can't link devices")`);
+        } else {
+          // Lock expirado, remover
+          fs.unlinkSync(lockFile);
+          logger.info('🔓 Lock expirado removido');
+        }
+      }
+      
+      // Criar lock de sessão
+      if (!fs.existsSync(sessionDir)) {
+        fs.mkdirSync(sessionDir, { recursive: true });
+      }
+      fs.writeFileSync(lockFile, Date.now().toString());
+      logger.info('🔒 Lock de sessão criado');
       
       if (sessionExists) {
         logger.info('📂 Sessão anterior encontrada, tentando restaurar...');
@@ -169,28 +209,27 @@ export class BaileysService extends EventEmitter {
       logger.info(`📦 Versão do Baileys: ${version.join('.')}`);
 
       // 🔧 CRÍTICO: Configurações mais conservadoras para evitar "can't link devices"
+      // 🔧 CRÍTICO: Configurações ultra-conservadoras para evitar "can't link devices"
       this.sock = this.baileys.default({
         auth: state,
-        printQRInTerminal: false, // Desabilitar QR no terminal para controle manual
+        printQRInTerminal: false,
         version,
-        defaultQueryTimeoutMs: 60000, // Reduzido para 1 minuto
-        connectTimeoutMs: 60000, // Reduzido para 1 minuto
-        keepAliveIntervalMs: 25000, // Aumentado para 25s (mais conservador)
-        retryRequestDelayMs: 500, // Aumentado delay entre retries
-        maxMsgRetryCount: 5, // Reduzido para evitar spam
+        defaultQueryTimeoutMs: 90000, // 1.5 minutos
+        connectTimeoutMs: 90000,
+        keepAliveIntervalMs: 30000, // 30s (mais conservador)
+        retryRequestDelayMs: 1000, // 1s entre retries
+        maxMsgRetryCount: 3, // Apenas 3 tentativas
         getMessage: async () => undefined,
-        markOnlineOnConnect: false, // 🔧 CRÍTICO: Não marcar online imediatamente
+        markOnlineOnConnect: false, // CRÍTICO: Não marcar online
         syncFullHistory: false,
         browser: this.baileys.Browsers.ubuntu('Chrome'),
-        qrTimeout: 60000, // Reduzido para 1 minuto
+        qrTimeout: 90000, // 1.5 minutos
         emitOwnEvents: false,
         shouldIgnoreJid: (jid: string) => jid.endsWith('@broadcast'),
-        // 🔧 NOVO: Configurações para evitar múltiplas conexões
         generateHighQualityLinkPreview: false,
-        patchMessageBeforeSending: (message) => {
-          // Não modificar mensagens
-          return message;
-        },
+        patchMessageBeforeSending: (message) => message,
+        // 🔧 NOVO: Desabilitar reconexão automática
+        shouldSyncHistoryMessage: () => false,
       });
 
       this.setupWebSocketHandlers();
@@ -866,7 +905,7 @@ export class BaileysService extends EventEmitter {
       if (this.sock.ws) {
         try {
           this.sock.ws.close();
-          await new Promise(resolve => setTimeout(resolve, 2000)); // Aumentado para 2s
+          await new Promise(resolve => setTimeout(resolve, 2000));
         } catch (error) {
           logger.warn('⚠️ Erro ao fechar WebSocket:', error);
         }
@@ -907,26 +946,41 @@ export class BaileysService extends EventEmitter {
       this.isInitializing = false;
       logger.info('Baileys desconectado');
     }
+    
+    // Remover lock de sessão
+    this.removeLockFile();
   }
 
   async forceNewQR(): Promise<string> {
     logger.info('🔄 [forceNewQR] Gerando novo QR Code...');
     
+    // 🔧 CRÍTICO: Verificar cooldown desde última tentativa de conexão
+    if (this.lastConnectionAttempt) {
+      const timeSinceLastAttempt = Date.now() - this.lastConnectionAttempt.getTime();
+      if (timeSinceLastAttempt < this.MIN_TIME_BETWEEN_ATTEMPTS) {
+        const waitTime = this.MIN_TIME_BETWEEN_ATTEMPTS - timeSinceLastAttempt;
+        const waitSeconds = Math.round(waitTime / 1000);
+        logger.error(`🚫 COOLDOWN ATIVO: Aguarde ${waitSeconds}s antes de gerar novo QR`);
+        throw new Error(`Aguarde ${waitSeconds} segundos antes de gerar novo QR Code (prevenção "can't link devices")`);
+      }
+    }
+    
     // 🔧 CRÍTICO: Verificar tempo desde último QR
     if (this.lastQRTime) {
       const timeSinceLastQR = Date.now() - this.lastQRTime.getTime();
-      if (timeSinceLastQR < 120000) { // Menos de 2 minutos
-        const waitTime = 120000 - timeSinceLastQR;
-        throw new Error(`Aguarde ${Math.round(waitTime/1000)}s antes de gerar novo QR Code (prevenção "can't link devices")`);
+      if (timeSinceLastQR < this.MIN_TIME_BETWEEN_QR) {
+        const waitTime = this.MIN_TIME_BETWEEN_QR - timeSinceLastQR;
+        const waitSeconds = Math.round(waitTime / 1000);
+        logger.error(`🚫 QR muito recente: Aguarde ${waitSeconds}s`);
+        throw new Error(`Aguarde ${waitSeconds} segundos antes de gerar novo QR Code`);
       }
     }
     
     if (this.isInitializing) {
       this.isInitializing = false;
       this.reconnecting = false;
-      await new Promise(resolve => setTimeout(resolve, 1000));
     }
-
+    
     if (this.qrTimeout) {
       clearTimeout(this.qrTimeout);
       this.qrTimeout = null;
@@ -951,21 +1005,24 @@ export class BaileysService extends EventEmitter {
     }
 
     const sessionDir = path.join(this.sessionPath, 'session');
-    
+  
     try {
       if (fs.existsSync(sessionDir)) {
+        // Remover lock primeiro
+        this.removeLockFile();
+        
         fs.rmSync(sessionDir, { recursive: true, force: true });
         logger.info('✅ Sessão removida');
       }
       
       // 🔧 CRÍTICO: Aguardar 5 segundos após remover sessão
-      logger.info('⏳ Aguardando 5s...');
+      logger.info('⏳ Aguardando 5s para estabilizar...');
       await new Promise(resolve => setTimeout(resolve, 5000));
       
     } catch (error: any) {
       logger.error('❌ Erro ao remover sessão:', error?.message);
     }
-
+    
     logger.info('🚀 Iniciando nova conexão...');
     
     this.removeAllListeners('qr');
@@ -1046,6 +1103,21 @@ export class BaileysService extends EventEmitter {
     });
   }
 
+  // 🔧 NOVO: Remover arquivo de lock
+  private removeLockFile(): void {
+    try {
+      const sessionDir = path.join(this.sessionPath, 'session');
+      const lockFile = path.join(sessionDir, '.lock');
+      
+      if (fs.existsSync(lockFile)) {
+        fs.unlinkSync(lockFile);
+        logger.info('🔓 Lock de sessão removido');
+      }
+    } catch (error) {
+      logger.warn('⚠️ Erro ao remover lock:', error);
+    }
+  }
+
   cleanup(): void {
     this.isDisposed = true;
     
@@ -1061,6 +1133,9 @@ export class BaileysService extends EventEmitter {
     this.stopKeepAlive();
     this.clearMessageQueue('Cleanup');
     this.removeAllListeners();
+    
+    // Remover lock de sessão
+    this.removeLockFile();
     
     BaileysService.instance = null;
   }
