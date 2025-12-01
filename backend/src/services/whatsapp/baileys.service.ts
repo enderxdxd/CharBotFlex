@@ -304,7 +304,8 @@ export class BaileysService extends EventEmitter {
 
     } catch (error) {
       this.isInitializing = false; // 🔒 Liberar flag em caso de erro
-      logger.error('Erro ao inicializar Baileys:', error);
+      this.reconnecting = false; // 🔒 Liberar flag de reconexão também
+      logger.error('❌ Erro ao inicializar Baileys:', error);
       throw error;
     }
   }
@@ -576,13 +577,20 @@ export class BaileysService extends EventEmitter {
           this.isConnected = false;
           this.connectionLostCount = 0;
           
-          // Tentar reconectar
-          if (!this.reconnecting && !this.isInitializing) {
-            logger.info('🔄 Iniciando reconexão automática...');
-            this.initialize().catch(err => {
-              logger.error('Erro ao reconectar:', err);
-            });
+          // 🔧 CORREÇÃO: Resetar flags travadas se WebSocket está morto
+          if (this.reconnecting || this.isInitializing) {
+            logger.warn('⚠️ Flags de reconexão/inicialização travadas detectadas! Resetando...');
+            this.reconnecting = false;
+            this.isInitializing = false;
           }
+          
+          // Tentar reconectar
+          logger.info('🔄 Iniciando reconexão automática...');
+          this.reconnecting = true; // Marcar como reconectando
+          this.initialize().catch(err => {
+            logger.error('❌ Erro ao reconectar:', err);
+            this.reconnecting = false;
+          });
         }
       }
     }, 30000); // A cada 30 segundos
