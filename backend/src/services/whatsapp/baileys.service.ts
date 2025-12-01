@@ -37,6 +37,10 @@ export class BaileysService extends EventEmitter {
   private healthCheckInterval: NodeJS.Timeout | null = null;
   private lastMessageTime: Date = new Date();
   private connectionLostCount: number = 0;
+  
+  // 🔧 NOVO: Keep-alive periódico
+  private keepAliveInterval: NodeJS.Timeout | null = null;
+  private lastKeepAlive: Date = new Date();
 
   constructor() {
     super();
@@ -102,7 +106,7 @@ export class BaileysService extends EventEmitter {
         version,
         defaultQueryTimeoutMs: 120000, // 🔧 2 minutos para timeout padrão
         connectTimeoutMs: 120000, // 2 minutos para conectar
-        keepAliveIntervalMs: 25000, // Keep alive a cada 25s
+        keepAliveIntervalMs: 10000, // 🔧 Keep alive a cada 10s (mais agressivo)
         // 🔧 Configurações de estabilidade melhoradas
         retryRequestDelayMs: 350,
         maxMsgRetryCount: 10,
@@ -252,8 +256,9 @@ export class BaileysService extends EventEmitter {
           
           this.emit('connected');
           
-          // 🔧 Iniciar health check
+          // 🔧 Iniciar health check e keep-alive
           this.startHealthCheck();
+          this.startKeepAlive();
         } else if (connection === 'connecting') {
           logger.info('🔄 Conectando ao WhatsApp...');
           logger.info('⏳ Aguardando resposta do servidor WhatsApp...');
@@ -353,9 +358,17 @@ export class BaileysService extends EventEmitter {
     return typeMap[type] || 'text';
   }
 
-  async sendTextMessage(phoneNumber: string, text: string) {
-    if (!this.sock) {
-      throw new Error('Baileys não está conectado');
+  async sendTextMessage(phoneNumber: string, text: string, retryCount: number = 0) {
+    // Verificar se está conectado
+    if (!this.sock || !this.isConnected) {
+      throw new Error('Baileys não está conectado. Por favor, reconecte o WhatsApp.');
+    }
+
+    // Verificar se WebSocket está aberto
+    if (this.sock.ws && (this.sock.ws as any).readyState !== 1) {
+      logger.warn(`⚠️ WebSocket não está aberto (readyState: ${(this.sock.ws as any).readyState})`);
+      this.isConnected = false;
+      throw new Error('Conexão WebSocket não está ativa. Tentando reconectar...');
     }
 
     try {
@@ -367,8 +380,29 @@ export class BaileysService extends EventEmitter {
       await this.sock.sendMessage(jid, { text });
       
       logger.info(`✅ Mensagem enviada com sucesso para ${phoneNumber}`);
-    } catch (error) {
-      logger.error(`❌ Erro ao enviar mensagem para ${phoneNumber}:`, error);
+      this.lastMessageTime = new Date(); // Atualizar timestamp de atividade
+    } catch (error: any) {
+      logger.error(`❌ Erro ao enviar mensagem para ${phoneNumber}:`, error?.message || error);
+      
+      // Se erro de conexão fechada e ainda não tentou retry
+      if (error?.message?.includes('Connection Closed') && retryCount < 2) {
+        logger.warn(`🔄 Tentando reenviar mensagem (tentativa ${retryCount + 1}/2)...`);
+        this.isConnected = false;
+        
+        // Aguardar 2 segundos e tentar novamente
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Tentar reconectar se necessário
+        if (!this.isConnected && !this.reconnecting && !this.isInitializing) {
+          logger.info('🔄 Reconectando antes de reenviar...');
+          await this.initialize();
+          await new Promise(resolve => setTimeout(resolve, 3000)); // Aguardar conexão estabilizar
+        }
+        
+        // Retry
+        return this.sendTextMessage(phoneNumber, text, retryCount + 1);
+      }
+      
       throw error;
     }
   }
@@ -449,6 +483,48 @@ export class BaileysService extends EventEmitter {
     return this.isConnected;
   }
 
+  // 🔧 NOVO: Keep-alive periódico para manter conexão ativa
+  private startKeepAlive() {
+    // Limpar keep-alive anterior se existir
+    if (this.keepAliveInterval) {
+      clearInterval(this.keepAliveInterval);
+    }
+
+    logger.info('💓 Iniciando keep-alive periódico (a cada 2 minutos)');
+
+    // Enviar presença a cada 2 minutos para manter conexão ativa
+    this.keepAliveInterval = setInterval(async () => {
+      if (!this.isConnected || !this.sock) {
+        logger.warn('⚠️ Keep-alive: Não conectado, pulando...');
+        return;
+      }
+
+      // Verificar se WebSocket está aberto
+      if (this.sock.ws && (this.sock.ws as any).readyState === 1) {
+        try {
+          // Enviar presença "available" para manter conexão
+          await this.sock.sendPresenceUpdate('available');
+          this.lastKeepAlive = new Date();
+          logger.info('💓 Keep-alive enviado com sucesso');
+        } catch (error: any) {
+          logger.warn('⚠️ Erro no keep-alive:', error?.message || error);
+          // Se falhar, o health check vai detectar e reconectar
+        }
+      } else {
+        logger.warn('⚠️ Keep-alive: WebSocket não está aberto');
+        this.isConnected = false;
+      }
+    }, 120000); // A cada 2 minutos
+  }
+
+  private stopKeepAlive() {
+    if (this.keepAliveInterval) {
+      clearInterval(this.keepAliveInterval);
+      this.keepAliveInterval = null;
+      logger.info('💓 Keep-alive parado');
+    }
+  }
+
   // 🔧 NOVO: Monitoramento de saúde da conexão
   private startHealthCheck() {
     // Limpar health check anterior se existir
@@ -459,26 +535,29 @@ export class BaileysService extends EventEmitter {
     logger.info('🏥 Iniciando monitoramento de saúde da conexão Baileys');
 
     // Verificar saúde a cada 30 segundos
-    this.healthCheckInterval = setInterval(() => {
+    this.healthCheckInterval = setInterval(async () => {
       const now = new Date();
       const timeSinceLastMessage = now.getTime() - this.lastMessageTime.getTime();
       const minutesSinceLastMessage = Math.floor(timeSinceLastMessage / 60000);
+      const timeSinceLastKeepAlive = now.getTime() - this.lastKeepAlive.getTime();
+      const minutesSinceKeepAlive = Math.floor(timeSinceLastKeepAlive / 60000);
 
       // Log de saúde
-      logger.info(`🏥 Health Check: Conexão ${this.isConnected ? 'ATIVA' : 'INATIVA'} | Última atividade: ${minutesSinceLastMessage}min atrás`);
+      logger.info(`🏥 Health Check: Conexão ${this.isConnected ? 'ATIVA' : 'INATIVA'} | Última atividade: ${minutesSinceLastMessage}min | Último keep-alive: ${minutesSinceKeepAlive}min`);
 
-      // Se passou mais de 10 minutos sem atividade e está conectado, fazer ping
-      if (this.isConnected && timeSinceLastMessage > 600000) { // 10 minutos
-        logger.warn('⚠️ Sem atividade há 10+ minutos, verificando conexão...');
+      // Se passou mais de 5 minutos sem atividade e está conectado, fazer ping
+      if (this.isConnected && timeSinceLastMessage > 300000) { // 5 minutos (reduzido de 10)
+        logger.warn('⚠️ Sem atividade há 5+ minutos, verificando conexão...');
         
         // Tentar enviar presença para verificar se está realmente conectado
-        if (this.sock) {
+        if (this.sock && this.sock.ws && (this.sock.ws as any).readyState === 1) { // 1 = OPEN
           try {
-            this.sock.sendPresenceUpdate('available');
+            await this.sock.sendPresenceUpdate('available');
             logger.info('✅ Ping de presença enviado com sucesso');
             this.lastMessageTime = new Date(); // Reset timer após ping bem-sucedido
-          } catch (error) {
-            logger.error('❌ Erro ao enviar ping de presença:', error);
+            this.connectionLostCount = 0; // Reset contador
+          } catch (error: any) {
+            logger.warn('⚠️ Erro ao enviar ping de presença (conexão pode estar caindo):', error?.message || error);
             this.connectionLostCount++;
             
             // Se falhou 3 vezes, tentar reconectar
@@ -490,6 +569,19 @@ export class BaileysService extends EventEmitter {
                 logger.error('Erro ao reconectar:', err);
               });
             }
+          }
+        } else {
+          // WebSocket não está aberto
+          logger.warn('⚠️ WebSocket não está aberto (readyState: ' + ((this.sock?.ws as any)?.readyState || 'N/A') + '), marcando como desconectado');
+          this.isConnected = false;
+          this.connectionLostCount = 0;
+          
+          // Tentar reconectar
+          if (!this.reconnecting && !this.isInitializing) {
+            logger.info('🔄 Iniciando reconexão automática...');
+            this.initialize().catch(err => {
+              logger.error('Erro ao reconectar:', err);
+            });
           }
         }
       }
@@ -515,8 +607,9 @@ export class BaileysService extends EventEmitter {
       this.qrTimeout = null;
     }
     
-    // 🔧 Parar health check
+    // 🔧 Parar health check e keep-alive
     this.stopHealthCheck();
+    this.stopKeepAlive();
 
     if (this.sock) {
       try {
@@ -538,107 +631,213 @@ export class BaileysService extends EventEmitter {
   async forceNewQR() {
     logger.info('🔄 [forceNewQR] Iniciando processo de geração de QR Code...');
     
-    // 🔒 Se já está inicializando, aguardar um pouco e tentar novamente
+    // 🔒 Se já está inicializando, forçar reset
     if (this.isInitializing) {
-      logger.warn('⚠️ [forceNewQR] Inicialização já em andamento, aguardando...');
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      logger.warn('⚠️ [forceNewQR] Inicialização travada detectada, forçando reset...');
+      this.isInitializing = false;
+      this.reconnecting = false;
       
-      // Se ainda está inicializando após 2s, retornar QR existente se houver
-      if (this.isInitializing && this.qrCode) {
-        logger.info('✅ [forceNewQR] Retornando QR Code existente');
-        return this.qrCode;
-      }
-      
-      // Se não tem QR, aguardar mais um pouco
-      if (this.isInitializing) {
-        logger.warn('⚠️ [forceNewQR] Ainda inicializando, aguardando mais 3s...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
-      }
+      // Aguardar 1 segundo para garantir que processos anteriores terminaram
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
-    // Limpar timeout anterior se existir
+    // 🧹 Limpar todos os timeouts e intervalos
     if (this.qrTimeout) {
-      logger.info('🧹 [forceNewQR] Limpando timeout anterior');
+      logger.info('🧹 [forceNewQR] Limpando timeout de QR anterior');
       clearTimeout(this.qrTimeout);
       this.qrTimeout = null;
     }
-
-    // Resetar contador de reconexão
-    this.reconnectAttempts = 0;
-    logger.info('🔄 [forceNewQR] Contador de reconexão resetado');
+    if (this.reconnectTimeout) {
+      logger.info('🧹 [forceNewQR] Limpando timeout de reconexão');
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
     
-    // Desconectar sessão atual se existir
+    // 🔄 Parar health check e keep-alive
+    this.stopHealthCheck();
+    this.stopKeepAlive();
+
+    // 🔄 Resetar flags e contadores
+    this.reconnectAttempts = 0;
+    this.isInitializing = false;
+    this.reconnecting = false;
+    this.isConnected = false;
+    this.connectionLostCount = 0;
+    logger.info('🔄 [forceNewQR] Flags e contadores resetados');
+    
+    // 🔌 Desconectar sessão atual se existir
     if (this.sock) {
       try {
         logger.info('🔌 [forceNewQR] Desconectando sessão anterior...');
-        this.sock.ev.removeAllListeners('connection.update');
-        this.sock.ev.removeAllListeners('creds.update');
-        this.sock.ev.removeAllListeners('messages.upsert');
-        await this.sock.end(undefined);
+        
+        // Remover todos os listeners
+        this.sock.ev.removeAllListeners();
+        
+        // Tentar fechar gracefully
+        try {
+          await Promise.race([
+            this.sock.end(undefined),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
+          ]);
+        } catch (endError) {
+          logger.warn('⚠️ [forceNewQR] Timeout ao fechar socket, forçando...');
+        }
+        
         this.sock = null;
         this.isConnected = false;
         this.qrCode = null;
         logger.info('✅ [forceNewQR] Sessão anterior desconectada');
       } catch (error) {
         logger.error('❌ [forceNewQR] Erro ao desconectar sessão:', error);
-        // Continuar mesmo com erro
+        // Forçar limpeza mesmo com erro
+        this.sock = null;
+        this.isConnected = false;
+        this.qrCode = null;
       }
     }
 
-    // Limpar sessão salva
+    // 🗑️ Limpar sessão salva (forçar limpeza completa)
     const sessionDir = path.join(this.sessionPath, 'session');
-    if (fs.existsSync(sessionDir)) {
-      try {
-        logger.info('🗑️ [forceNewQR] Removendo sessão salva...');
+    logger.info('🗑️ [forceNewQR] Removendo sessão salva...');
+    
+    try {
+      if (fs.existsSync(sessionDir)) {
+        // Tentar remover normalmente
         fs.rmSync(sessionDir, { recursive: true, force: true });
-        logger.info('✅ [forceNewQR] Sessão anterior removida');
-      } catch (error) {
-        logger.error('❌ [forceNewQR] Erro ao remover sessão:', error);
-        // Continuar mesmo com erro
+        logger.info('✅ [forceNewQR] Sessão removida com sucesso');
+      } else {
+        logger.info('ℹ️ [forceNewQR] Nenhuma sessão anterior encontrada');
+      }
+      
+      // Aguardar um pouco para garantir que arquivos foram removidos
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+    } catch (error: any) {
+      logger.error('❌ [forceNewQR] Erro ao remover sessão:', error?.message || error);
+      
+      // Tentar remover arquivos individualmente se falhar
+      try {
+        if (fs.existsSync(sessionDir)) {
+          const files = fs.readdirSync(sessionDir);
+          for (const file of files) {
+            try {
+              fs.unlinkSync(path.join(sessionDir, file));
+            } catch (e) {
+              // Ignorar erros individuais
+            }
+          }
+          fs.rmdirSync(sessionDir);
+          logger.info('✅ [forceNewQR] Sessão removida (método alternativo)');
+        }
+      } catch (altError) {
+        logger.warn('⚠️ [forceNewQR] Não foi possível remover sessão completamente');
+        logger.warn('⚠️ [forceNewQR] Continuando mesmo assim...');
       }
     }
 
-    // Reinicializar para gerar novo QR Code
+    // 🚀 Reinicializar para gerar novo QR Code
     logger.info('🚀 [forceNewQR] Iniciando nova conexão Baileys...');
+    
+    // Remover listeners antigos do EventEmitter
+    this.removeAllListeners('qr');
+    this.removeAllListeners('connected');
+    this.removeAllListeners('disconnected');
+    
     try {
-      await this.initialize();
+      // Inicializar com timeout
+      await Promise.race([
+        this.initialize(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Timeout na inicialização')), 30000)
+        )
+      ]);
       logger.info('✅ [forceNewQR] Baileys inicializado com sucesso');
-    } catch (error) {
-      logger.error('❌ [forceNewQR] Erro ao inicializar Baileys:', error);
-      throw new Error('Falha ao inicializar WhatsApp. Verifique os logs do servidor.');
+    } catch (error: any) {
+      logger.error('❌ [forceNewQR] Erro ao inicializar Baileys:', error?.message || error);
+      
+      // Resetar flags em caso de erro
+      this.isInitializing = false;
+      this.reconnecting = false;
+      
+      throw new Error('Falha ao inicializar WhatsApp. ' + (error?.message || 'Verifique os logs do servidor.'));
     }
     
-    // 🔧 Aumentar timeout para 2 minutos (tempo suficiente para gerar QR)
-    logger.info('⏳ [forceNewQR] Aguardando geração do QR Code (timeout: 120s)...');
+    // ⏳ Aguardar geração do QR Code com timeout de 60 segundos
+    logger.info('⏳ [forceNewQR] Aguardando geração do QR Code (timeout: 60s)...');
+    
     return new Promise<string>((resolve, reject) => {
+      let resolved = false;
+      
+      // Timeout de 60 segundos
       this.qrTimeout = setTimeout(() => {
+        if (resolved) return;
+        resolved = true;
+        
         this.qrTimeout = null;
-        logger.error('❌ [forceNewQR] Timeout ao gerar QR Code após 120 segundos');
+        this.isInitializing = false; // Liberar flag
+        
+        logger.error('❌ [forceNewQR] Timeout ao gerar QR Code após 60 segundos');
         logger.error('💡 [forceNewQR] Possíveis causas:');
         logger.error('   - Problema de conexão com servidores do WhatsApp');
         logger.error('   - Firewall bloqueando conexão');
-        logger.error('   - Sessão corrompida não foi removida corretamente');
-        reject(new Error('Timeout ao gerar QR Code. Verifique sua conexão e tente novamente.'));
-      }, 120000); // 120 segundos
+        logger.error('   - Porta bloqueada ou proxy interferindo');
+        
+        reject(new Error('Timeout ao gerar QR Code. Verifique sua conexão e tente novamente em alguns minutos.'));
+      }, 60000); // 60 segundos (reduzido de 120)
 
-      this.once('qr', (qr) => {
+      // Listener para QR Code gerado
+      const qrListener = (qr: string) => {
+        if (resolved) return;
+        resolved = true;
+        
         if (this.qrTimeout) {
           clearTimeout(this.qrTimeout);
           this.qrTimeout = null;
         }
+        
         logger.info('✅ [forceNewQR] QR Code gerado com sucesso!');
         resolve(qr);
-      });
-
-      // 🔧 Também rejeitar se desconectar antes de gerar QR
-      this.once('disconnected', () => {
+      };
+      
+      // Listener para desconexão
+      const disconnectListener = () => {
+        if (resolved) return;
+        resolved = true;
+        
         if (this.qrTimeout) {
           clearTimeout(this.qrTimeout);
           this.qrTimeout = null;
         }
+        
+        this.isInitializing = false; // Liberar flag
+        
         logger.error('❌ [forceNewQR] Desconectado antes de gerar QR Code');
         reject(new Error('Conexão perdida antes de gerar QR Code. Tente novamente.'));
-      });
+      };
+      
+      // Registrar listeners
+      this.once('qr', qrListener);
+      this.once('disconnected', disconnectListener);
+      
+      // Cleanup: remover listeners após resolver/rejeitar
+      const cleanup = () => {
+        this.removeListener('qr', qrListener);
+        this.removeListener('disconnected', disconnectListener);
+      };
+      
+      // Adicionar cleanup em ambos os casos
+      const originalResolve = resolve;
+      const originalReject = reject;
+      
+      resolve = ((value: any) => {
+        cleanup();
+        originalResolve(value);
+      }) as any;
+      
+      reject = ((reason: any) => {
+        cleanup();
+        originalReject(reason);
+      }) as any;
     });
   }
 

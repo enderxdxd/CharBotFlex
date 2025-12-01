@@ -247,7 +247,9 @@ process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
   const isBaileysError = reason?.message?.includes('Stream Errored') ||
                         reason?.message?.includes('Connection') ||
                         reason?.message?.includes('WebSocket') ||
-                        reason?.stack?.includes('baileys');
+                        reason?.message?.includes('Precondition Required') ||
+                        reason?.stack?.includes('baileys') ||
+                        reason?.stack?.includes('sendPresenceUpdate');
   
   if (isBaileysError) {
     logger.warn('⚠️ Promise rejeitada do Baileys - Servidor continua rodando');
