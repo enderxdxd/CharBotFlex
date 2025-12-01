@@ -25,32 +25,45 @@ export class BaileysService extends EventEmitter {
   private sessionPath: string;
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 5;
-  private reconnectDelay: number = 5000; // 5 segundos
+  private reconnectDelay: number = 5000;
   
-  // 🔒 CORREÇÃO: Prevenir múltiplas inicializações simultâneas
+  // Flags de controle
   private isInitializing: boolean = false;
   private reconnecting: boolean = false;
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private qrTimeout: NodeJS.Timeout | null = null;
   
-  // 🔧 Monitoramento de saúde da conexão
+  // Health check
   private healthCheckInterval: NodeJS.Timeout | null = null;
   private lastMessageTime: Date = new Date();
   private connectionLostCount: number = 0;
   
-  // 🔧 Keep-alive periódico
+  // Keep-alive
   private keepAliveInterval: NodeJS.Timeout | null = null;
   private lastKeepAlive: Date = new Date();
   
-  // 🔧 NOVO: Cache de estado do WebSocket
-  private lastWSState: number = -1;
+  // 🔧 NOVO: Fila de mensagens pendentes
+  private messageQueue: Array<{
+    phoneNumber: string;
+    text: string;
+    resolve: (value: void) => void;
+    reject: (reason: any) => void;
+    timestamp: Date;
+  }> = [];
+  private isProcessingQueue: boolean = false;
+  
+  // 🔧 NOVO: Contadores para monitoramento
+  private stats = {
+    messagesSent: 0,
+    messagesFailed: 0,
+    reconnections: 0,
+    lastError: null as string | null,
+  };
 
   constructor() {
     super();
     this.sessionPath = process.env.BAILEYS_SESSION_PATH || '/data/baileys_sessions';
     logger.info(`📁 Session path: ${this.sessionPath}`);
-    
-    // 🔧 NOVO: Garantir que o diretório de sessão existe
     this.ensureSessionDirectory();
   }
 
@@ -66,19 +79,22 @@ export class BaileysService extends EventEmitter {
   }
 
   async initialize() {
-    // 🔒 Prevenir inicialização concorrente
     if (this.isInitializing) {
-      logger.warn('⚠️  Inicialização já em andamento, ignorando...');
+      logger.warn('⚠️  Inicialização já em andamento, aguardando...');
+      // Aguardar até inicialização terminar (max 30s)
+      const maxWait = 30000;
+      const startWait = Date.now();
+      while (this.isInitializing && (Date.now() - startWait) < maxWait) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
       return;
     }
 
-    // 🔒 Verificar se socket já está conectado
-    if (this.isConnected && this.sock) {
-      logger.info('✅ Socket já conectado; abortando nova init.');
+    if (this.isConnected && this.sock && this.isWebSocketOpen()) {
+      logger.info('✅ Socket já conectado e WebSocket aberto');
       return;
     }
 
-    // Limpar timeout de reconexão anterior se existir
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
@@ -89,14 +105,12 @@ export class BaileysService extends EventEmitter {
     try {
       logger.info('🔄 Inicializando Baileys...');
       
-      // 🔒 Dynamic import of Baileys (ESM module)
       if (!this.baileys) {
         logger.info('📦 Carregando módulo Baileys...');
         this.baileys = await import('@whiskeysockets/baileys');
         logger.info('✅ Módulo Baileys carregado');
       }
       
-      // 🔒 Desconectar socket anterior antes de criar novo
       if (this.sock) {
         await this.cleanupSocket();
       }
@@ -111,53 +125,46 @@ export class BaileysService extends EventEmitter {
         auth: state,
         printQRInTerminal: true,
         version,
-        defaultQueryTimeoutMs: 120000, // 2 minutos
+        defaultQueryTimeoutMs: 120000,
         connectTimeoutMs: 120000,
-        keepAliveIntervalMs: 10000, // Keep alive a cada 10s
+        keepAliveIntervalMs: 10000,
         retryRequestDelayMs: 350,
         maxMsgRetryCount: 10,
         getMessage: async () => undefined,
         markOnlineOnConnect: true,
         syncFullHistory: false,
         browser: this.baileys.Browsers.ubuntu('Chrome'),
-        qrTimeout: 120000, // 2 minutos para QR code
+        qrTimeout: 120000,
         emitOwnEvents: false,
         shouldIgnoreJid: (jid: string) => jid.endsWith('@broadcast'),
       });
 
-      // 🔒 Tratar erros do WebSocket para evitar crash
       this.setupWebSocketHandlers();
-
-      // 🔒 Tratar erros não capturados do socket
+      
       this.sock.ev.on('error' as any, (error: any) => {
         logger.warn('⚠️ Socket error event (tratado):', error.message);
       });
 
-      // Event: Atualização de conexão
       this.sock.ev.on('connection.update', async (update) => {
         await this.handleConnectionUpdate(update);
       });
 
-      // Event: Atualização de credenciais
       this.sock.ev.on('creds.update', saveCreds);
 
-      // Event: Mensagens recebidas
       this.sock.ev.on('messages.upsert', async ({ messages, type }) => {
         await this.handleMessagesUpsert(messages, type);
       });
 
-      // Event: Status de mensagem atualizado
       this.sock.ev.on('messages.update', (updates) => {
         for (const update of updates) {
           this.emit('messageUpdate', update);
         }
       });
 
-      // 🔒 Timeout de inicialização
       setTimeout(() => {
         if (!this.isConnected && this.isInitializing) {
           this.isInitializing = false;
-          logger.info('⏱️  Timeout de inicialização, marcando como concluída');
+          logger.info('⏱️  Timeout de inicialização');
         }
       }, 10000);
 
@@ -173,17 +180,23 @@ export class BaileysService extends EventEmitter {
     if (!this.sock?.ws) return;
 
     this.sock.ws.on('error', (error: any) => {
-      logger.warn('⚠️ WebSocket error (tratado):', error.message);
+      logger.warn('⚠️ WebSocket error:', error.message);
+      this.stats.lastError = error.message;
     });
 
     this.sock.ws.on('close', (code: number, reason: string) => {
       logger.info(`🔌 WebSocket fechado: code=${code}, reason=${reason || 'sem motivo'}`);
-      this.lastWSState = 3; // CLOSED
+      this.isConnected = false;
+      
+      // 🔧 CRÍTICO: Processar fila de mensagens pendentes como falha
+      this.clearMessageQueue('WebSocket fechado');
     });
 
     this.sock.ws.on('open', () => {
       logger.info('🔌 WebSocket aberto');
-      this.lastWSState = 1; // OPEN
+      
+      // 🔧 NOVO: Processar fila quando WebSocket abre
+      this.processMessageQueue();
     });
   }
 
@@ -234,10 +247,13 @@ export class BaileysService extends EventEmitter {
     }
 
     this.isInitializing = false;
+    this.isConnected = false;
+    
+    // 🔧 Limpar fila de mensagens
+    this.clearMessageQueue('Conexão fechada');
 
     if (statusCode === this.baileys!.DisconnectReason.loggedOut) {
       logger.warn('⚠️ Usuário fez logout do WhatsApp');
-      this.isConnected = false;
       this.reconnectAttempts = 0;
       this.emit('disconnected');
       return;
@@ -247,30 +263,29 @@ export class BaileysService extends EventEmitter {
       await this.scheduleReconnect();
     } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       logger.warn('⚠️ Limite de tentativas de reconexão atingido.');
-      this.isConnected = false;
       this.reconnectAttempts = 0;
       this.emit('disconnected');
     } else {
-      this.isConnected = false;
       this.emit('disconnected');
     }
   }
 
   private async scheduleReconnect(): Promise<void> {
     if (this.reconnecting) {
-      logger.warn('⚠️  Reconexão já em andamento, ignorando...');
+      logger.warn('⚠️  Reconexão já em andamento');
       return;
     }
     
     this.reconnecting = true;
     this.reconnectAttempts++;
+    this.stats.reconnections++;
     
     const delay = Math.min(
       this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1),
       30000
     );
     
-    logger.info(`🔄 Reconectando automaticamente (${this.reconnectAttempts}/${this.maxReconnectAttempts}) em ${Math.round(delay/1000)}s...`);
+    logger.info(`🔄 Reconectando (${this.reconnectAttempts}/${this.maxReconnectAttempts}) em ${Math.round(delay/1000)}s...`);
     
     this.reconnectTimeout = setTimeout(async () => {
       try {
@@ -295,12 +310,14 @@ export class BaileysService extends EventEmitter {
       logger.info('✅ Baileys conectado! (NOVO LOGIN)');
     } else {
       logger.info('✅ Baileys conectado! (SESSÃO RESTAURADA)');
-      logger.info('🎉 Não é necessário escanear QR Code novamente!');
     }
     
     this.emit('connected');
     this.startHealthCheck();
     this.startKeepAlive();
+    
+    // 🔧 CRÍTICO: Processar fila de mensagens pendentes
+    await this.processMessageQueue();
   }
 
   private async handleMessagesUpsert(messages: any[], type: string): Promise<void> {
@@ -365,38 +382,125 @@ export class BaileysService extends EventEmitter {
     return typeMap[type] || 'text';
   }
 
-  async sendTextMessage(phoneNumber: string, text: string, retryCount: number = 0): Promise<void> {
-    if (!this.sock || !this.isConnected) {
-      throw new Error('Baileys não está conectado');
+  // 🔧 NOVO: Verificar se WebSocket está realmente aberto
+  private isWebSocketOpen(): boolean {
+    if (!this.sock?.ws) return false;
+    
+    try {
+      const readyState = (this.sock.ws as any).readyState;
+      return readyState === 1; // 1 = OPEN
+    } catch (error) {
+      return false;
+    }
+  }
+
+  // 🔧 NOVO: Verificar e garantir conexão antes de enviar
+  private async ensureConnection(): Promise<boolean> {
+    // Se não tem socket, tentar inicializar
+    if (!this.sock) {
+      logger.warn('⚠️ Socket não existe, tentando inicializar...');
+      
+      if (!this.isInitializing && !this.reconnecting) {
+        try {
+          await this.initialize();
+          // Aguardar até 10s para conexão estabelecer
+          const maxWait = 10000;
+          const startWait = Date.now();
+          while (!this.isConnected && (Date.now() - startWait) < maxWait) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        } catch (error) {
+          logger.error('❌ Falha ao inicializar:', error);
+          return false;
+        }
+      }
     }
 
-    // Verificar se WebSocket está aberto
-    if (!this.sock.ws) {
-      logger.error('❌ [sendTextMessage] WebSocket é null/undefined');
-      this.isConnected = false;
-      throw new Error('WebSocket não disponível');
+    // Verificar se está conectado e WebSocket está aberto
+    if (!this.isConnected || !this.isWebSocketOpen()) {
+      logger.warn('⚠️ Não conectado ou WebSocket não está aberto');
+      
+      // Se não está inicializando nem reconectando, tentar reconectar
+      if (!this.isInitializing && !this.reconnecting) {
+        logger.info('🔄 Tentando reconectar...');
+        this.isConnected = false;
+        
+        try {
+          await this.initialize();
+          // Aguardar até 10s
+          const maxWait = 10000;
+          const startWait = Date.now();
+          while (!this.isConnected && (Date.now() - startWait) < maxWait) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        } catch (error) {
+          logger.error('❌ Falha ao reconectar:', error);
+          return false;
+        }
+      }
+    }
+
+    return this.isConnected && this.isWebSocketOpen();
+  }
+
+  async sendTextMessage(phoneNumber: string, text: string, retryCount: number = 0): Promise<void> {
+    // 🔧 CRÍTICO: Verificar e garantir conexão ANTES de tentar enviar
+    const isConnected = await this.ensureConnection();
+    
+    if (!isConnected) {
+      logger.warn('⚠️ Não foi possível estabelecer conexão, adicionando à fila...');
+      
+      // Adicionar à fila para processar quando conectar
+      return new Promise((resolve, reject) => {
+        this.messageQueue.push({
+          phoneNumber,
+          text,
+          resolve,
+          reject,
+          timestamp: new Date(),
+        });
+        
+        logger.info(`📥 Mensagem adicionada à fila (${this.messageQueue.length} pendentes)`);
+        
+        // Timeout de 60 segundos para mensagem na fila
+        setTimeout(() => {
+          const index = this.messageQueue.findIndex(
+            m => m.phoneNumber === phoneNumber && m.text === text
+          );
+          if (index >= 0) {
+            const msg = this.messageQueue.splice(index, 1)[0];
+            msg.reject(new Error('Timeout: Conexão não estabelecida em 60s'));
+          }
+        }, 60000);
+      });
+    }
+
+    // Verificação final de segurança
+    if (!this.sock || !this.sock.ws) {
+      throw new Error('Socket ou WebSocket indisponível após ensureConnection');
     }
 
     const wsReadyState = (this.sock.ws as any).readyState;
     if (wsReadyState !== 1) {
-      logger.warn(`⚠️ [sendTextMessage] WebSocket não está aberto (readyState: ${wsReadyState})`);
-      this.isConnected = false;
-      throw new Error('Conexão WebSocket não está ativa');
+      throw new Error(`WebSocket não está aberto (readyState: ${wsReadyState})`);
     }
 
     try {
       const jid = this.formatPhoneNumber(phoneNumber);
       
-      logger.info(`📤 Enviando para ${phoneNumber} (JID: ${jid})`);
+      logger.info(`📤 Enviando para ${phoneNumber}`);
       
       await this.sock.sendMessage(jid, { text });
       
-      logger.info(`✅ Mensagem enviada com sucesso para ${phoneNumber}`);
+      logger.info(`✅ Mensagem enviada com sucesso`);
       this.lastMessageTime = new Date();
+      this.stats.messagesSent++;
     } catch (error: any) {
-      logger.error(`❌ Erro ao enviar mensagem:`, {
+      this.stats.messagesFailed++;
+      this.stats.lastError = error?.message;
+      
+      logger.error(`❌ Erro ao enviar:`, {
         message: error?.message,
-        name: error?.name,
         code: error?.code
       });
       
@@ -408,15 +512,10 @@ export class BaileysService extends EventEmitter {
         error?.code === 'EPIPE';
       
       if (isConnectionError && retryCount < 2) {
-        logger.warn(`🔄 Erro de conexão, tentando reenviar (${retryCount + 1}/2)...`);
+        logger.warn(`🔄 Erro de conexão, retry ${retryCount + 1}/2...`);
         this.isConnected = false;
         
         await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        if (!this.isConnected && !this.reconnecting && !this.isInitializing) {
-          await this.initialize();
-          await new Promise(resolve => setTimeout(resolve, 3000));
-        }
         
         return this.sendTextMessage(phoneNumber, text, retryCount + 1);
       }
@@ -425,13 +524,63 @@ export class BaileysService extends EventEmitter {
     }
   }
 
+  // 🔧 NOVO: Processar fila de mensagens pendentes
+  private async processMessageQueue(): Promise<void> {
+    if (this.isProcessingQueue || this.messageQueue.length === 0) {
+      return;
+    }
+
+    if (!this.isConnected || !this.isWebSocketOpen()) {
+      logger.warn('⚠️ Não conectado, não processando fila');
+      return;
+    }
+
+    this.isProcessingQueue = true;
+    logger.info(`📤 Processando fila de mensagens (${this.messageQueue.length} pendentes)...`);
+
+    while (this.messageQueue.length > 0 && this.isConnected && this.isWebSocketOpen()) {
+      const message = this.messageQueue.shift();
+      if (!message) break;
+
+      try {
+        await this.sendTextMessage(message.phoneNumber, message.text);
+        message.resolve();
+        logger.info(`✅ Mensagem da fila enviada para ${message.phoneNumber}`);
+      } catch (error) {
+        message.reject(error);
+        logger.error(`❌ Falha ao enviar mensagem da fila:`, error);
+      }
+
+      // Pequeno delay entre mensagens para não sobrecarregar
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    this.isProcessingQueue = false;
+    logger.info(`✅ Fila processada (${this.messageQueue.length} restantes)`);
+  }
+
+  // 🔧 NOVO: Limpar fila de mensagens
+  private clearMessageQueue(reason: string): void {
+    if (this.messageQueue.length === 0) return;
+
+    logger.warn(`⚠️ Limpando fila de ${this.messageQueue.length} mensagens: ${reason}`);
+    
+    for (const message of this.messageQueue) {
+      message.reject(new Error(`Fila limpa: ${reason}`));
+    }
+    
+    this.messageQueue = [];
+  }
+
   async sendMediaMessage(
     phoneNumber: string,
     mediaUrl: string,
     caption?: string,
     type: 'image' | 'video' | 'audio' | 'document' = 'image'
   ): Promise<void> {
-    if (!this.sock) {
+    const isConnected = await this.ensureConnection();
+    
+    if (!isConnected || !this.sock) {
       throw new Error('Baileys não está conectado');
     }
 
@@ -450,7 +599,9 @@ export class BaileysService extends EventEmitter {
       
       logger.info(`✅ Mídia ${type} enviada para ${phoneNumber}`);
       this.lastMessageTime = new Date();
+      this.stats.messagesSent++;
     } catch (error) {
+      this.stats.messagesFailed++;
       logger.error('Erro ao enviar mídia:', error);
       throw error;
     }
@@ -494,7 +645,17 @@ export class BaileysService extends EventEmitter {
   }
 
   isReady(): boolean {
-    return this.isConnected;
+    return this.isConnected && this.isWebSocketOpen();
+  }
+
+  // 🔧 NOVO: Obter estatísticas
+  getStats() {
+    return {
+      ...this.stats,
+      isConnected: this.isConnected,
+      queueSize: this.messageQueue.length,
+      uptime: Date.now() - this.lastMessageTime.getTime(),
+    };
   }
 
   private startKeepAlive(): void {
@@ -502,14 +663,14 @@ export class BaileysService extends EventEmitter {
       clearInterval(this.keepAliveInterval);
     }
 
-    logger.info('💓 Iniciando keep-alive periódico (a cada 2 minutos)');
+    logger.info('💓 Iniciando keep-alive (a cada 2 min)');
 
     this.keepAliveInterval = setInterval(async () => {
       if (!this.isConnected || !this.sock) {
         return;
       }
 
-      if (this.sock.ws && (this.sock.ws as any).readyState === 1) {
+      if (this.isWebSocketOpen()) {
         try {
           await this.sock.sendPresenceUpdate('available');
           this.lastKeepAlive = new Date();
@@ -518,7 +679,7 @@ export class BaileysService extends EventEmitter {
           logger.warn('⚠️ Erro no keep-alive:', error?.message);
         }
       } else {
-        logger.warn('⚠️ Keep-alive: WebSocket não está aberto');
+        logger.warn('⚠️ Keep-alive: WebSocket fechado');
         this.isConnected = false;
       }
     }, 120000);
@@ -528,7 +689,6 @@ export class BaileysService extends EventEmitter {
     if (this.keepAliveInterval) {
       clearInterval(this.keepAliveInterval);
       this.keepAliveInterval = null;
-      logger.info('💓 Keep-alive parado');
     }
   }
 
@@ -537,26 +697,24 @@ export class BaileysService extends EventEmitter {
       clearInterval(this.healthCheckInterval);
     }
 
-    logger.info('🏥 Iniciando monitoramento de saúde da conexão');
+    logger.info('🏥 Iniciando health check');
 
     this.healthCheckInterval = setInterval(async () => {
       const now = new Date();
       const timeSinceLastMessage = now.getTime() - this.lastMessageTime.getTime();
       const minutesSinceLastMessage = Math.floor(timeSinceLastMessage / 60000);
 
-      logger.info(`🏥 Health Check: Conexão ${this.isConnected ? 'ATIVA' : 'INATIVA'} | Última atividade: ${minutesSinceLastMessage}min`);
+      logger.info(`🏥 Health: ${this.isConnected ? 'OK' : 'DOWN'} | Atividade: ${minutesSinceLastMessage}min | Fila: ${this.messageQueue.length}`);
 
       if (this.isConnected && timeSinceLastMessage > 300000) {
-        logger.warn('⚠️ Sem atividade há 5+ minutos, verificando conexão...');
+        logger.warn('⚠️ Sem atividade há 5+ min, verificando...');
         
-        if (this.sock && this.sock.ws && (this.sock.ws as any).readyState === 1) {
+        if (this.isWebSocketOpen()) {
           try {
-            await this.sock.sendPresenceUpdate('available');
+            await this.sock!.sendPresenceUpdate('available');
             this.lastMessageTime = new Date();
             this.connectionLostCount = 0;
-            logger.info('✅ Ping de presença enviado');
           } catch (error: any) {
-            logger.warn('⚠️ Erro ao enviar ping:', error?.message);
             this.connectionLostCount++;
             
             if (this.connectionLostCount >= 3) {
@@ -569,12 +727,10 @@ export class BaileysService extends EventEmitter {
             }
           }
         } else {
-          const wsState = (this.sock?.ws as any)?.readyState || 'N/A';
-          logger.warn(`⚠️ WebSocket não está aberto (readyState: ${wsState})`);
+          logger.warn('⚠️ WebSocket fechado');
           this.isConnected = false;
           
           if (this.reconnecting || this.isInitializing) {
-            logger.warn('⚠️ Flags travadas detectadas! Resetando...');
             this.reconnecting = false;
             this.isInitializing = false;
           }
@@ -593,7 +749,6 @@ export class BaileysService extends EventEmitter {
     if (this.healthCheckInterval) {
       clearInterval(this.healthCheckInterval);
       this.healthCheckInterval = null;
-      logger.info('🏥 Monitoramento de saúde parado');
     }
   }
 
@@ -601,10 +756,7 @@ export class BaileysService extends EventEmitter {
     if (!this.sock) return;
 
     try {
-      this.sock.ev.removeAllListeners('connection.update');
-      this.sock.ev.removeAllListeners('creds.update');
-      this.sock.ev.removeAllListeners('messages.upsert');
-      this.sock.ev.removeAllListeners('messages.update');
+      this.sock.ev.removeAllListeners(undefined);
       
       if (this.sock.ws) {
         try {
@@ -617,9 +769,9 @@ export class BaileysService extends EventEmitter {
       
       this.sock.end(undefined);
       this.sock = null;
-      logger.info('Socket anterior encerrado');
+      logger.info('Socket limpo');
     } catch (error) {
-      logger.error('Erro ao encerrar socket anterior:', error);
+      logger.error('Erro ao limpar socket:', error);
       this.sock = null;
     }
   }
@@ -636,6 +788,7 @@ export class BaileysService extends EventEmitter {
     
     this.stopHealthCheck();
     this.stopKeepAlive();
+    this.clearMessageQueue('Desconectando');
 
     if (this.sock) {
       try {
@@ -652,16 +805,14 @@ export class BaileysService extends EventEmitter {
   }
 
   async forceNewQR(): Promise<string> {
-    logger.info('🔄 [forceNewQR] Iniciando processo de geração de QR Code...');
+    logger.info('🔄 [forceNewQR] Gerando novo QR Code...');
     
     if (this.isInitializing) {
-      logger.warn('⚠️ [forceNewQR] Inicialização travada, forçando reset...');
       this.isInitializing = false;
       this.reconnecting = false;
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
-    // Limpar timeouts e intervalos
     if (this.qrTimeout) {
       clearTimeout(this.qrTimeout);
       this.qrTimeout = null;
@@ -673,38 +824,33 @@ export class BaileysService extends EventEmitter {
     
     this.stopHealthCheck();
     this.stopKeepAlive();
+    this.clearMessageQueue('Gerando novo QR');
 
-    // Resetar flags
     this.reconnectAttempts = 0;
     this.isInitializing = false;
     this.reconnecting = false;
     this.isConnected = false;
     this.connectionLostCount = 0;
     
-    // Desconectar sessão atual
     if (this.sock) {
       await this.cleanupSocket();
     }
 
-    // Limpar sessão salva
     const sessionDir = path.join(this.sessionPath, 'session');
-    logger.info('🗑️ [forceNewQR] Removendo sessão salva...');
     
     try {
       if (fs.existsSync(sessionDir)) {
         fs.rmSync(sessionDir, { recursive: true, force: true });
-        logger.info('✅ [forceNewQR] Sessão removida');
+        logger.info('✅ Sessão removida');
       }
       
-      logger.info('⏳ [forceNewQR] Aguardando 3s...');
       await new Promise(resolve => setTimeout(resolve, 3000));
       
     } catch (error: any) {
-      logger.error('❌ [forceNewQR] Erro ao remover sessão:', error?.message);
+      logger.error('❌ Erro ao remover sessão:', error?.message);
     }
 
-    // Reinicializar
-    logger.info('🚀 [forceNewQR] Iniciando nova conexão...');
+    logger.info('🚀 Iniciando nova conexão...');
     
     this.removeAllListeners('qr');
     this.removeAllListeners('connected');
@@ -714,18 +860,15 @@ export class BaileysService extends EventEmitter {
       await Promise.race([
         this.initialize(),
         new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout na inicialização')), 30000)
+          setTimeout(() => reject(new Error('Timeout')), 30000)
         )
       ]);
     } catch (error: any) {
-      logger.error('❌ [forceNewQR] Erro ao inicializar:', error?.message);
+      logger.error('❌ Erro ao inicializar:', error?.message);
       this.isInitializing = false;
       this.reconnecting = false;
-      throw new Error('Falha ao inicializar WhatsApp. ' + (error?.message || ''));
+      throw new Error('Falha ao inicializar WhatsApp');
     }
-    
-    // Aguardar QR Code
-    logger.info('⏳ [forceNewQR] Aguardando QR Code (timeout: 60s)...');
     
     return new Promise<string>((resolve, reject) => {
       let resolved = false;
@@ -747,7 +890,6 @@ export class BaileysService extends EventEmitter {
           this.qrTimeout = null;
         }
         
-        logger.info('✅ [forceNewQR] QR Code gerado!');
         resolve(qr);
       };
       
@@ -761,7 +903,7 @@ export class BaileysService extends EventEmitter {
         }
         
         this.isInitializing = false;
-        reject(new Error('Conexão perdida antes de gerar QR Code'));
+        reject(new Error('Desconectado antes de gerar QR'));
       };
       
       this.once('qr', qrListener);
@@ -780,6 +922,7 @@ export class BaileysService extends EventEmitter {
     }
     this.stopHealthCheck();
     this.stopKeepAlive();
+    this.clearMessageQueue('Cleanup');
     this.removeAllListeners();
   }
 }
