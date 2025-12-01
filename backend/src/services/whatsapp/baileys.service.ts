@@ -670,8 +670,11 @@ export class BaileysService extends EventEmitter {
       try {
         logger.info('🔌 [forceNewQR] Desconectando sessão anterior...');
         
-        // Remover todos os listeners
-        this.sock.ev.removeAllListeners();
+        // Remover listeners específicos
+        this.sock.ev.removeAllListeners('connection.update');
+        this.sock.ev.removeAllListeners('creds.update');
+        this.sock.ev.removeAllListeners('messages.upsert');
+        this.sock.ev.removeAllListeners('messages.update');
         
         // Tentar fechar gracefully
         try {
