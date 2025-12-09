@@ -9,6 +9,9 @@ export const getHealth = async (req: AuthRequest, res: Response) => {
     const manager = getWhatsAppManager();
     const baileysService = (manager as any).baileysService;
     
+    // 🆕 Incluir informações de cooldown
+    const stats = baileysService?.getStats?.() || {};
+    
     res.json({
       success: true,
       data: {
@@ -16,9 +19,21 @@ export const getHealth = async (req: AuthRequest, res: Response) => {
         provider: manager.getCurrentProvider(),
         hasSocket: !!baileysService?.sock,
         reconnectAttempts: baileysService?.reconnectAttempts || 0,
-        maxReconnectAttempts: baileysService?.maxReconnectAttempts || 5,
+        maxReconnectAttempts: baileysService?.maxReconnectAttempts || 3,
         isInitializing: baileysService?.isInitializing || false,
         reconnecting: baileysService?.reconnecting || false,
+        // 🆕 Informações de cooldown
+        cooldown: {
+          active: stats.cooldownActive || false,
+          waitSeconds: stats.cooldownSeconds || 0,
+          reason: stats.cooldownReason || '',
+        },
+        stats: {
+          messagesSent: stats.messagesSent || 0,
+          messagesFailed: stats.messagesFailed || 0,
+          reconnections: stats.reconnections || 0,
+          qrAttempts: stats.qrAttempts || 0,
+        }
       }
     });
   } catch (error) {
@@ -100,12 +115,29 @@ export const generateQrCode = async (req: AuthRequest, res: Response) => {
       });
     }
     
+    // 🆕 Verificar cooldown ANTES de qualquer tentativa
+    if (baileysService?.canGenerateQR) {
+      const cooldownCheck = baileysService.canGenerateQR();
+      if (!cooldownCheck.canGenerate) {
+        logger.warn(`🚫 Cooldown ativo: ${cooldownCheck.waitSeconds}s restantes`);
+        return res.status(429).json({
+          success: false,
+          error: `Aguarde ${cooldownCheck.waitSeconds} segundos antes de tentar novamente`,
+          code: 'COOLDOWN_ACTIVE',
+          data: {
+            waitSeconds: cooldownCheck.waitSeconds,
+            reason: cooldownCheck.reason,
+          }
+        });
+      }
+    }
+    
     // Verificar se já está tentando gerar QR
     if (baileysService?.isInitializing) {
       logger.info('⏳ Já está gerando QR Code, aguardando...');
       
-      // Aguardar até 10 segundos pelo QR existente
-      for (let i = 0; i < 10; i++) {
+      // Aguardar até 15 segundos pelo QR existente
+      for (let i = 0; i < 15; i++) {
         await new Promise(resolve => setTimeout(resolve, 1000));
         const qr = manager.getBaileysQRCode();
         if (qr) {
@@ -115,6 +147,30 @@ export const generateQrCode = async (req: AuthRequest, res: Response) => {
             data: { qrCode: qr },
           });
         }
+        
+        // Se conectou enquanto aguardava
+        if (manager.isBaileysReady()) {
+          return res.json({
+            success: true,
+            data: {
+              qrCode: null,
+              message: 'WhatsApp conectado com sucesso',
+              connected: true,
+            },
+          });
+        }
+      }
+      
+      // Se ainda não tem QR após 15s e ainda está inicializando
+      if (baileysService?.isInitializing) {
+        return res.status(202).json({
+          success: true,
+          data: {
+            qrCode: null,
+            message: 'Aguardando geração do QR Code. Tente novamente em alguns segundos.',
+            pending: true,
+          },
+        });
       }
     }
     
@@ -132,16 +188,28 @@ export const generateQrCode = async (req: AuthRequest, res: Response) => {
       } catch (qrError: any) {
         logger.error('❌ Erro ao gerar QR Code:', qrError);
         
-        // Tentar uma segunda vez após 2 segundos
-        logger.info('🔄 Tentando novamente em 2 segundos...');
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        try {
-          qrCode = await manager.generateNewQR();
-          logger.info('✅ QR Code gerado com sucesso na segunda tentativa');
-        } catch (retryError: any) {
-          throw new Error('Não foi possível gerar QR Code após 2 tentativas. Verifique se o backend está rodando corretamente e tente novamente.');
+        // 🆕 Verificar se é erro de cooldown
+        if (qrError.message?.includes('Aguarde') || 
+            qrError.message?.includes('cooldown') ||
+            qrError.message?.includes("can't link")) {
+          
+          // Extrair tempo de espera da mensagem
+          const match = qrError.message.match(/(\d+)\s*(segundos?|s)/i);
+          const waitSeconds = match ? parseInt(match[1]) : 300;
+          
+          return res.status(429).json({
+            success: false,
+            error: qrError.message,
+            code: 'COOLDOWN_ACTIVE',
+            data: {
+              waitSeconds,
+              canRetryAt: new Date(Date.now() + waitSeconds * 1000).toISOString(),
+            }
+          });
         }
+        
+        // 🔧 NÃO tentar novamente automaticamente - isso causa o problema
+        throw qrError;
       }
     } else {
       logger.info('✅ QR Code existente retornado');
@@ -151,33 +219,66 @@ export const generateQrCode = async (req: AuthRequest, res: Response) => {
       success: true,
       data: {
         qrCode: qrCode,
+        // 🆕 Instruções importantes
+        instructions: [
+          'Escaneie o QR Code apenas UMA VEZ',
+          'Aguarde até 60 segundos após escanear',
+          'NÃO tente gerar outro QR se este não funcionar imediatamente',
+          'Se der erro, aguarde 5-10 minutos antes de tentar novamente'
+        ]
       },
     });
   } catch (error: any) {
     logger.error('❌ Erro ao gerar QR Code:', error);
     
-    // Mensagem de erro mais específica e amigável
+    // 🔧 MELHORADO: Mensagens de erro mais específicas
     let errorMessage = 'Não foi possível conectar ao WhatsApp. Tente novamente em alguns instantes.';
+    let errorCode = 'UNKNOWN_ERROR';
+    let waitSeconds = 0;
     
     if (error.message) {
       if (error.message.includes('Timeout')) {
         errorMessage = 'Tempo esgotado ao conectar com WhatsApp. Verifique sua conexão com a internet e tente novamente.';
+        errorCode = 'TIMEOUT';
       } else if (error.message.includes('Conexão perdida')) {
         errorMessage = 'Conexão com WhatsApp foi perdida. Tente novamente.';
+        errorCode = 'CONNECTION_LOST';
       } else if (error.message.includes('Falha ao inicializar')) {
         errorMessage = 'Falha ao inicializar WhatsApp. Verifique se o backend está rodando corretamente.';
+        errorCode = 'INIT_FAILED';
       } else if (error.message.includes('multidevice') || error.message.includes('dispositivos')) {
-        errorMessage = 'Não é possível conectar novos dispositivos. Você atingiu o limite de 4 dispositivos vinculados ao WhatsApp. Desconecte um dispositivo no app do WhatsApp (Configurações > Aparelhos conectados) e tente novamente.';
-      } else if (error.message.toLowerCase().includes("can't link")) {
-        errorMessage = 'O WhatsApp bloqueou temporariamente novas conexões. Aguarde 10-15 minutos e tente novamente. Isso acontece quando você tenta conectar/desconectar muitas vezes seguidas.';
+        errorMessage = 'Você atingiu o limite de 4 dispositivos vinculados ao WhatsApp. Desconecte um dispositivo no app do WhatsApp (Configurações > Aparelhos conectados) e tente novamente.';
+        errorCode = 'MAX_DEVICES';
+      } else if (error.message.toLowerCase().includes("can't link") || 
+                 error.message.includes('bloqueou')) {
+        errorMessage = 'O WhatsApp bloqueou temporariamente novas conexões. Aguarde 5-10 minutos e tente novamente. Isso acontece quando você tenta conectar/desconectar muitas vezes seguidas.';
+        errorCode = 'CANT_LINK_DEVICES';
+        waitSeconds = 600; // 10 minutos
+      } else if (error.message.includes('Aguarde')) {
+        errorMessage = error.message;
+        errorCode = 'COOLDOWN_ACTIVE';
+        const match = error.message.match(/(\d+)\s*(segundos?|s|minutos?|m)/i);
+        if (match) {
+          waitSeconds = parseInt(match[1]);
+          if (match[2].toLowerCase().startsWith('m')) {
+            waitSeconds *= 60;
+          }
+        }
       } else {
         errorMessage = error.message;
       }
     }
     
-    res.status(500).json({
+    const statusCode = errorCode === 'COOLDOWN_ACTIVE' || errorCode === 'CANT_LINK_DEVICES' ? 429 : 500;
+    
+    res.status(statusCode).json({
       success: false,
       error: errorMessage,
+      code: errorCode,
+      data: waitSeconds > 0 ? {
+        waitSeconds,
+        canRetryAt: new Date(Date.now() + waitSeconds * 1000).toISOString(),
+      } : undefined,
       details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
     });
   }
@@ -208,6 +309,8 @@ export const disconnectWhatsApp = async (req: AuthRequest, res: Response) => {
     res.json({
       success: true,
       message: 'WhatsApp desconectado com sucesso',
+      // 🆕 Aviso sobre cooldown
+      warning: 'Aguarde pelo menos 5 minutos antes de tentar conectar novamente para evitar bloqueio do WhatsApp.',
     });
   } catch (error) {
     logger.error('Erro ao desconectar WhatsApp:', error);
@@ -221,13 +324,43 @@ export const disconnectWhatsApp = async (req: AuthRequest, res: Response) => {
 export const restartWhatsApp = async (req: AuthRequest, res: Response) => {
   try {
     const manager = getWhatsAppManager();
+    const baileysService = (manager as any).baileysService;
+    
+    // 🆕 Verificar cooldown antes de reiniciar
+    if (baileysService?.canGenerateQR) {
+      const cooldownCheck = baileysService.canGenerateQR();
+      if (!cooldownCheck.canGenerate) {
+        return res.status(429).json({
+          success: false,
+          error: `Aguarde ${cooldownCheck.waitSeconds} segundos antes de reiniciar`,
+          code: 'COOLDOWN_ACTIVE',
+          data: {
+            waitSeconds: cooldownCheck.waitSeconds,
+          }
+        });
+      }
+    }
     
     // Reiniciar conexão
     logger.info('Reiniciando WhatsApp...');
     
+    // Primeiro desconectar
+    await manager.disconnect();
+    
+    // Aguardar 5 segundos
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    
+    // Tentar inicializar novamente
+    try {
+      await manager.initialize();
+    } catch (initError: any) {
+      logger.warn('⚠️ Erro ao reinicializar:', initError.message);
+      // Não falhar aqui, apenas logar
+    }
+    
     res.json({
       success: true,
-      message: 'WhatsApp reiniciado com sucesso',
+      message: 'WhatsApp reiniciado. Aguarde alguns segundos e verifique o status.',
     });
   } catch (error) {
     logger.error('Erro ao reiniciar WhatsApp:', error);
@@ -301,10 +434,21 @@ export const clearSession = async (req: AuthRequest, res: Response) => {
     
     // Limpar sessão salva
     const sessionPath = process.env.BAILEYS_SESSION_PATH || '/data/baileys_sessions';
-    const sessionDir = require('path').join(sessionPath, 'session');
+    const path = await import('path');
+    const fs = await import('fs');
+    const sessionDir = path.join(sessionPath, 'session');
     
-    if (require('fs').existsSync(sessionDir)) {
-      require('fs').rmSync(sessionDir, { recursive: true, force: true });
+    if (fs.existsSync(sessionDir)) {
+      // 🆕 Criar backup antes de remover
+      const backupDir = path.join(sessionPath, `session_backup_${Date.now()}`);
+      try {
+        fs.cpSync(sessionDir, backupDir, { recursive: true });
+        logger.info(`📦 Backup criado: ${backupDir}`);
+      } catch (e) {
+        logger.warn('⚠️ Não foi possível criar backup');
+      }
+      
+      fs.rmSync(sessionDir, { recursive: true, force: true });
       logger.info('✅ Sessão removida com sucesso');
     } else {
       logger.info('ℹ️ Nenhuma sessão encontrada para remover');
@@ -312,13 +456,53 @@ export const clearSession = async (req: AuthRequest, res: Response) => {
     
     res.json({
       success: true,
-      message: 'Sessão limpa com sucesso. Você pode conectar novamente agora.',
+      message: 'Sessão limpa com sucesso. Aguarde 5 minutos antes de conectar novamente.',
+      // 🆕 Aviso importante
+      warning: 'IMPORTANTE: Aguarde pelo menos 5 minutos antes de tentar conectar novamente para evitar o erro "can\'t link devices".',
     });
   } catch (error) {
     logger.error('Erro ao limpar sessão:', error);
     res.status(500).json({
       success: false,
       error: 'Erro ao limpar sessão do WhatsApp',
+    });
+  }
+};
+
+// 🆕 Novo endpoint para verificar cooldown
+export const checkCooldown = async (req: AuthRequest, res: Response) => {
+  try {
+    const manager = getWhatsAppManager();
+    const baileysService = (manager as any).baileysService;
+    
+    if (baileysService?.canGenerateQR) {
+      const cooldown = baileysService.canGenerateQR();
+      res.json({
+        success: true,
+        data: {
+          canGenerate: cooldown.canGenerate,
+          waitSeconds: cooldown.waitSeconds,
+          reason: cooldown.reason,
+          canRetryAt: cooldown.waitSeconds > 0 
+            ? new Date(Date.now() + cooldown.waitSeconds * 1000).toISOString()
+            : null,
+        }
+      });
+    } else {
+      res.json({
+        success: true,
+        data: {
+          canGenerate: true,
+          waitSeconds: 0,
+          reason: '',
+        }
+      });
+    }
+  } catch (error) {
+    logger.error('Erro ao verificar cooldown:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao verificar cooldown',
     });
   }
 };

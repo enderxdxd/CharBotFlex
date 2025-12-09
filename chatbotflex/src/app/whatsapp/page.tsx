@@ -15,7 +15,9 @@ import {
   Plus,
   Trash2,
   Shield,
-  Bot
+  Bot,
+  Clock,
+  AlertTriangle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Image from 'next/image';
@@ -37,6 +39,12 @@ interface BotFlow {
   isActive: boolean;
 }
 
+interface CooldownInfo {
+  active: boolean;
+  waitSeconds: number;
+  reason: string;
+}
+
 export default function WhatsAppPage() {
   const { isAdmin, loading: permissionsLoading } = usePermissions();
   const [connections, setConnections] = useState<WhatsAppConnection[]>([]);
@@ -48,11 +56,60 @@ export default function WhatsAppPage() {
   const [selectedConnection, setSelectedConnection] = useState<string | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
   const [qrError, setQrError] = useState(false);
+  const [cooldown, setCooldown] = useState<CooldownInfo>({ active: false, waitSeconds: 0, reason: '' });
+  const [cooldownTimer, setCooldownTimer] = useState<number>(0);
+
+  // Format cooldown time for display
+  const formatCooldownTime = (seconds: number): string => {
+    if (seconds <= 0) return '';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (mins > 0) {
+      return `${mins}m ${secs}s`;
+    }
+    return `${secs}s`;
+  };
+
+  // Cooldown timer effect
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    if (cooldownTimer > 0) {
+      interval = setInterval(() => {
+        setCooldownTimer(prev => {
+          if (prev <= 1) {
+            setCooldown({ active: false, waitSeconds: 0, reason: '' });
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    
+    return () => { if (interval) clearInterval(interval); };
+  }, [cooldownTimer]);
+
+  // Check cooldown on mount
+  const checkCooldown = async () => {
+    try {
+      const response = await api.get('/whatsapp/cooldown');
+      if (response.data.success && response.data.data) {
+        const { canGenerate, waitSeconds, reason } = response.data.data;
+        if (!canGenerate && waitSeconds > 0) {
+          setCooldown({ active: true, waitSeconds, reason });
+          setCooldownTimer(waitSeconds);
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao verificar cooldown:', error);
+    }
+  };
 
   useEffect(() => {
     fetchConnections();
     fetchQrCode();
     fetchBotFlows();
+    checkCooldown();
 
     // Escutar eventos do Socket.IO para erros do WhatsApp
     if (typeof window !== 'undefined') {
@@ -141,6 +198,15 @@ export default function WhatsAppPage() {
   };
 
   const handleGenerateQr = async () => {
+    // Verificar cooldown primeiro
+    if (cooldown.active || cooldownTimer > 0) {
+      toast.warning(`Aguarde ${formatCooldownTime(cooldownTimer)} antes de tentar novamente`, {
+        duration: 5000,
+        description: 'O WhatsApp limita tentativas de conexão para evitar spam.',
+      });
+      return;
+    }
+
     try {
       setShowQrModal(true);
       setQrCode(null);
@@ -165,14 +231,34 @@ export default function WhatsAppPage() {
     } catch (error: any) {
       console.error('Erro ao gerar QR Code:', error);
       
+      // Tratar resposta 429 (cooldown)
+      if (error.response?.status === 429) {
+        const waitSeconds = error.response?.data?.data?.waitSeconds || 300;
+        setCooldown({ active: true, waitSeconds, reason: error.response?.data?.code || 'cooldown' });
+        setCooldownTimer(waitSeconds);
+        
+        toast.warning(`Aguarde ${Math.ceil(waitSeconds / 60)} minutos antes de tentar novamente`, {
+          duration: 10000,
+          description: 'O WhatsApp bloqueou temporariamente novas conexões.',
+        });
+        setQrError(true);
+        setQrCode(null);
+        return;
+      }
+      
       // Mostrar mensagem de erro específica se disponível
       const errorMessage = error.response?.data?.error || 'Não foi possível conectar ao WhatsApp. Tente novamente.';
+      const errorCode = error.response?.data?.code;
+      
+      // Se for erro de cooldown/can't link, ativar timer
+      if (errorCode === 'CANT_LINK_DEVICES' || errorCode === 'COOLDOWN_ACTIVE') {
+        const waitSeconds = error.response?.data?.data?.waitSeconds || 600;
+        setCooldown({ active: true, waitSeconds, reason: errorCode });
+        setCooldownTimer(waitSeconds);
+      }
+      
       toast.error(errorMessage, { 
         duration: 7000,
-        action: {
-          label: 'Tentar Novamente',
-          onClick: () => handleGenerateQr()
-        }
       });
       
       setQrError(true);
@@ -239,10 +325,24 @@ export default function WhatsAppPage() {
               
               <button
                 onClick={handleGenerateQr}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                disabled={cooldown.active || cooldownTimer > 0}
+                className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                  cooldownTimer > 0 
+                    ? 'bg-gray-400 cursor-not-allowed' 
+                    : 'bg-green-600 hover:bg-green-700 focus:ring-green-500'
+                }`}
               >
-                <QrCode className="h-4 w-4 mr-2" />
-                Conectar Novo Número
+                {cooldownTimer > 0 ? (
+                  <>
+                    <Clock className="h-4 w-4 mr-2" />
+                    Aguarde {formatCooldownTime(cooldownTimer)}
+                  </>
+                ) : (
+                  <>
+                    <QrCode className="h-4 w-4 mr-2" />
+                    Conectar Novo Número
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -278,10 +378,24 @@ export default function WhatsAppPage() {
               <p className="text-gray-500 mb-6">Conecte seu primeiro número do WhatsApp para começar</p>
               <button
                 onClick={handleGenerateQr}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
+                disabled={cooldown.active || cooldownTimer > 0}
+                className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white ${
+                  cooldownTimer > 0 
+                    ? 'bg-gray-400 cursor-not-allowed' 
+                    : 'bg-green-600 hover:bg-green-700'
+                }`}
               >
-                <QrCode className="h-4 w-4 mr-2" />
-                Conectar WhatsApp
+                {cooldownTimer > 0 ? (
+                  <>
+                    <Clock className="h-4 w-4 mr-2" />
+                    Aguarde {formatCooldownTime(cooldownTimer)}
+                  </>
+                ) : (
+                  <>
+                    <QrCode className="h-4 w-4 mr-2" />
+                    Conectar WhatsApp
+                  </>
+                )}
               </button>
             </div>
           ) : (
@@ -382,6 +496,23 @@ export default function WhatsAppPage() {
                   </button>
                 </div>
 
+                {/* Cooldown Warning Banner */}
+                {cooldownTimer > 0 && (
+                  <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                    <div className="flex items-center">
+                      <AlertTriangle className="h-5 w-5 text-amber-500 mr-2" />
+                      <div>
+                        <p className="text-sm font-medium text-amber-800">
+                          Aguarde {formatCooldownTime(cooldownTimer)}
+                        </p>
+                        <p className="text-xs text-amber-600">
+                          O WhatsApp limita tentativas de conexão para evitar spam.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {qrLoading ? (
                   <div className="text-center py-8">
                     <Loader2 className="animate-spin h-8 w-8 text-indigo-600 mx-auto mb-4" />
@@ -393,14 +524,31 @@ export default function WhatsAppPage() {
                     <XCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
                     <p className="text-gray-900 font-medium mb-2">Erro ao gerar QR Code</p>
                     <p className="text-sm text-gray-600 mb-6">
-                      Verifique sua conexão e os logs do servidor
+                      {cooldownTimer > 0 
+                        ? `Aguarde ${formatCooldownTime(cooldownTimer)} antes de tentar novamente.`
+                        : 'Verifique sua conexão e os logs do servidor'
+                      }
                     </p>
                     <button
                       onClick={handleGenerateQr}
-                      className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
+                      disabled={cooldownTimer > 0}
+                      className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white ${
+                        cooldownTimer > 0 
+                          ? 'bg-gray-400 cursor-not-allowed' 
+                          : 'bg-green-600 hover:bg-green-700'
+                      }`}
                     >
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      Tentar Novamente
+                      {cooldownTimer > 0 ? (
+                        <>
+                          <Clock className="h-4 w-4 mr-2" />
+                          Aguarde {formatCooldownTime(cooldownTimer)}
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          Tentar Novamente
+                        </>
+                      )}
                     </button>
                   </div>
                 ) : qrCode ? (
@@ -426,10 +574,24 @@ export default function WhatsAppPage() {
                     </p>
                     <button
                       onClick={handleGenerateQr}
-                      className="inline-flex items-center px-4 py-2 text-sm font-medium text-indigo-600 hover:text-indigo-700"
+                      disabled={cooldownTimer > 0}
+                      className={`inline-flex items-center px-4 py-2 text-sm font-medium ${
+                        cooldownTimer > 0 
+                          ? 'text-gray-400 cursor-not-allowed' 
+                          : 'text-indigo-600 hover:text-indigo-700'
+                      }`}
                     >
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      Gerar Novo QR Code
+                      {cooldownTimer > 0 ? (
+                        <>
+                          <Clock className="h-4 w-4 mr-2" />
+                          Aguarde {formatCooldownTime(cooldownTimer)}
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          Gerar Novo QR Code
+                        </>
+                      )}
                     </button>
                   </div>
                 ) : null}

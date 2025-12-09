@@ -88,6 +88,7 @@ router.post('/whatsapp/disconnect/:id', whatsappController.disconnectWhatsApp as
 router.post('/whatsapp/restart', whatsappController.restartWhatsApp as any);
 router.post('/whatsapp/link-flow/:id', whatsappController.linkBotFlow as any);
 router.post('/whatsapp/clear-session', whatsappController.clearSession as any);
+router.get('/whatsapp/cooldown', whatsappController.checkCooldown as any);
 
 // ==========================================
 // ROTAS DE DEPARTAMENTOS

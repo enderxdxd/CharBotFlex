@@ -17,6 +17,16 @@ type BaileysModule = typeof import('@whiskeysockets/baileys');
 type WASocket = import('@whiskeysockets/baileys').WASocket;
 type proto = typeof import('@whiskeysockets/baileys').proto;
 
+// 🆕 Estado global para controle de cooldown entre processos/requests
+interface GlobalCooldownState {
+  lastConnectionAttempt: number | null;
+  lastQRTime: number | null;
+  isConnecting: boolean;
+}
+
+// Arquivo de cooldown persistente
+const COOLDOWN_FILE = '/tmp/baileys_cooldown.json';
+
 export class BaileysService extends EventEmitter {
   private sock: WASocket | null = null;
   private baileys: BaileysModule | null = null;
@@ -24,8 +34,8 @@ export class BaileysService extends EventEmitter {
   private isConnected: boolean = false;
   private sessionPath: string;
   private reconnectAttempts: number = 0;
-  private maxReconnectAttempts: number = 5;
-  private reconnectDelay: number = 5000;
+  private maxReconnectAttempts: number = 3; // 🔧 Reduzido de 5 para 3
+  private reconnectDelay: number = 10000; // 🔧 Aumentado de 5s para 10s
   
   // Flags de controle
   private isInitializing: boolean = false;
@@ -60,18 +70,22 @@ export class BaileysService extends EventEmitter {
     lastError: null as string | null,
   };
   
-  // 🔧 NOVO: Controle de instância única
+  // 🔧 Controle de instância única
   private static instance: BaileysService | null = null;
   private isDisposed: boolean = false;
   
-  // 🔧 NOVO: Controle de pairing e prevenção "can't link devices"
+  // 🔧 MELHORADO: Controle de pairing e prevenção "can't link devices"
   private pairingCode: string | null = null;
   private lastQRTime: Date | null = null;
   private lastConnectionAttempt: Date | null = null;
   private qrAttempts: number = 0;
-  private maxQRAttempts: number = 3;
-  private readonly MIN_TIME_BETWEEN_ATTEMPTS = 180000; // 3 minutos
-  private readonly MIN_TIME_BETWEEN_QR = 120000; // 2 minutos
+  private maxQRAttempts: number = 2; // 🔧 Reduzido de 3 para 2
+  
+  // 🔧 AUMENTADO: Cooldowns mais conservadores
+  private readonly MIN_TIME_BETWEEN_ATTEMPTS = 300000; // 🔧 5 minutos (era 3)
+  private readonly MIN_TIME_BETWEEN_QR = 180000; // 🔧 3 minutos (era 2)
+  private readonly COOLDOWN_AFTER_ERROR = 600000; // 🆕 10 minutos após erro
+  
   private sessionLocked: boolean = false;
 
   constructor() {
@@ -88,7 +102,75 @@ export class BaileysService extends EventEmitter {
     logger.info(`📁 Session path: ${this.sessionPath}`);
     this.ensureSessionDirectory();
     
+    // 🆕 Carregar estado de cooldown do arquivo
+    this.loadCooldownState();
+    
     BaileysService.instance = this;
+  }
+
+  // 🆕 Carregar estado de cooldown persistente
+  private loadCooldownState(): void {
+    try {
+      if (fs.existsSync(COOLDOWN_FILE)) {
+        const data = JSON.parse(fs.readFileSync(COOLDOWN_FILE, 'utf8')) as GlobalCooldownState;
+        if (data.lastConnectionAttempt) {
+          this.lastConnectionAttempt = new Date(data.lastConnectionAttempt);
+        }
+        if (data.lastQRTime) {
+          this.lastQRTime = new Date(data.lastQRTime);
+        }
+        logger.info('📂 Estado de cooldown carregado');
+      }
+    } catch (error) {
+      logger.warn('⚠️ Erro ao carregar estado de cooldown:', error);
+    }
+  }
+
+  // 🆕 Salvar estado de cooldown persistente
+  private saveCooldownState(): void {
+    try {
+      const state: GlobalCooldownState = {
+        lastConnectionAttempt: this.lastConnectionAttempt?.getTime() || null,
+        lastQRTime: this.lastQRTime?.getTime() || null,
+        isConnecting: this.isInitializing,
+      };
+      fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(state), 'utf8');
+    } catch (error) {
+      logger.warn('⚠️ Erro ao salvar estado de cooldown:', error);
+    }
+  }
+
+  // 🆕 Verificar cooldown global
+  private checkCooldown(): { canProceed: boolean; waitSeconds: number; reason: string } {
+    const now = Date.now();
+    
+    // Verificar cooldown de conexão
+    if (this.lastConnectionAttempt) {
+      const timeSinceLastAttempt = now - this.lastConnectionAttempt.getTime();
+      if (timeSinceLastAttempt < this.MIN_TIME_BETWEEN_ATTEMPTS) {
+        const waitTime = this.MIN_TIME_BETWEEN_ATTEMPTS - timeSinceLastAttempt;
+        return {
+          canProceed: false,
+          waitSeconds: Math.ceil(waitTime / 1000),
+          reason: 'connection_cooldown'
+        };
+      }
+    }
+    
+    // Verificar cooldown de QR
+    if (this.lastQRTime) {
+      const timeSinceLastQR = now - this.lastQRTime.getTime();
+      if (timeSinceLastQR < this.MIN_TIME_BETWEEN_QR) {
+        const waitTime = this.MIN_TIME_BETWEEN_QR - timeSinceLastQR;
+        return {
+          canProceed: false,
+          waitSeconds: Math.ceil(waitTime / 1000),
+          reason: 'qr_cooldown'
+        };
+      }
+    }
+    
+    return { canProceed: true, waitSeconds: 0, reason: '' };
   }
 
   private ensureSessionDirectory(): void {
@@ -102,7 +184,7 @@ export class BaileysService extends EventEmitter {
     }
   }
 
-  async initialize() {
+  async initialize(): Promise<void> {
     if (this.isDisposed) {
       throw new Error('BaileysService foi descartado. Crie uma nova instância.');
     }
@@ -119,28 +201,34 @@ export class BaileysService extends EventEmitter {
       while (this.isInitializing && (Date.now() - startWait) < maxWait) {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
+      
+      // 🆕 Se ainda está inicializando após timeout, retornar
+      if (this.isInitializing) {
+        logger.warn('⚠️  Timeout aguardando inicialização anterior');
+        throw new Error('Inicialização em andamento. Aguarde.');
+      }
       return;
     }
 
-    if (this.isConnected) {
+    if (this.isConnected && this.isWebSocketOpen()) {
       logger.info('✅ Já conectado');
       return;
     }
 
-    // 🔧 CRÍTICO: Cooldown obrigatório entre tentativas de conexão
-    if (this.lastConnectionAttempt) {
-      const timeSinceLastAttempt = Date.now() - this.lastConnectionAttempt.getTime();
-      if (timeSinceLastAttempt < this.MIN_TIME_BETWEEN_ATTEMPTS) {
-        const waitTime = this.MIN_TIME_BETWEEN_ATTEMPTS - timeSinceLastAttempt;
-        const waitSeconds = Math.round(waitTime / 1000);
-        logger.error(`🚫 COOLDOWN ATIVO: Aguarde ${waitSeconds}s antes de tentar conectar novamente`);
-        logger.error('💡 Isso previne o erro "can\'t link devices" do WhatsApp');
-        throw new Error(`Aguarde ${waitSeconds} segundos antes de tentar conectar novamente (prevenção "can't link devices")`);
-      }
+    // 🔧 CRÍTICO: Verificar cooldown global
+    const cooldown = this.checkCooldown();
+    if (!cooldown.canProceed) {
+      const message = cooldown.reason === 'connection_cooldown'
+        ? `Aguarde ${cooldown.waitSeconds}s antes de tentar conectar (prevenção "can't link devices")`
+        : `Aguarde ${cooldown.waitSeconds}s antes de gerar novo QR Code`;
+      
+      logger.error(`🚫 COOLDOWN ATIVO: ${message}`);
+      throw new Error(message);
     }
 
     // Registrar tentativa de conexão
     this.lastConnectionAttempt = new Date();
+    this.saveCooldownState();
 
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
@@ -162,8 +250,8 @@ export class BaileysService extends EventEmitter {
       if (this.sock) {
         logger.info('🧹 Limpando socket anterior...');
         await this.cleanupSocket();
-        logger.info('⏳ Aguardando 3s após cleanup...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        logger.info('⏳ Aguardando 5s após cleanup...');
+        await new Promise(resolve => setTimeout(resolve, 5000)); // 🔧 Aumentado de 3s para 5s
       }
       
       const sessionDir = path.join(this.sessionPath, 'session');
@@ -172,7 +260,7 @@ export class BaileysService extends EventEmitter {
       const sessionExists = fs.existsSync(sessionDir) && 
                            fs.readdirSync(sessionDir).length > 0;
       
-      // 🔧 NOVO: Verificar lock de sessão (indica tentativa recente)
+      // 🔧 Verificar lock de sessão (indica tentativa recente)
       const lockFile = path.join(sessionDir, '.lock');
       if (fs.existsSync(lockFile)) {
         const lockTime = fs.statSync(lockFile).mtime.getTime();
@@ -182,6 +270,7 @@ export class BaileysService extends EventEmitter {
           const waitTime = this.MIN_TIME_BETWEEN_ATTEMPTS - timeSinceLock;
           const waitSeconds = Math.round(waitTime / 1000);
           logger.error(`🔒 Sessão bloqueada! Aguarde ${waitSeconds}s`);
+          this.isInitializing = false;
           throw new Error(`Sessão em uso recentemente. Aguarde ${waitSeconds}s (prevenção "can't link devices")`);
         } else {
           // Lock expirado, remover
@@ -208,28 +297,28 @@ export class BaileysService extends EventEmitter {
       const { version } = await this.baileys.fetchLatestBaileysVersion();
       logger.info(`📦 Versão do Baileys: ${version.join('.')}`);
 
-      // 🔧 CRÍTICO: Configurações mais conservadoras para evitar "can't link devices"
       // 🔧 CRÍTICO: Configurações ultra-conservadoras para evitar "can't link devices"
       this.sock = this.baileys.default({
         auth: state,
         printQRInTerminal: false,
         version,
-        defaultQueryTimeoutMs: 90000, // 1.5 minutos
-        connectTimeoutMs: 90000,
-        keepAliveIntervalMs: 30000, // 30s (mais conservador)
-        retryRequestDelayMs: 1000, // 1s entre retries
-        maxMsgRetryCount: 3, // Apenas 3 tentativas
+        defaultQueryTimeoutMs: 120000, // 🔧 2 minutos (era 1.5)
+        connectTimeoutMs: 120000, // 🔧 2 minutos
+        keepAliveIntervalMs: 45000, // 🔧 45s (era 30s)
+        retryRequestDelayMs: 2000, // 🔧 2s entre retries (era 1s)
+        maxMsgRetryCount: 2, // 🔧 Apenas 2 tentativas (era 3)
         getMessage: async () => undefined,
         markOnlineOnConnect: false, // CRÍTICO: Não marcar online
         syncFullHistory: false,
         browser: this.baileys.Browsers.ubuntu('Chrome'),
-        qrTimeout: 90000, // 1.5 minutos
+        qrTimeout: 120000, // 🔧 2 minutos (era 1.5)
         emitOwnEvents: false,
         shouldIgnoreJid: (jid: string) => jid.endsWith('@broadcast'),
         generateHighQualityLinkPreview: false,
         patchMessageBeforeSending: (message) => message,
-        // 🔧 NOVO: Desabilitar reconexão automática
         shouldSyncHistoryMessage: () => false,
+        // 🆕 Configurações adicionais de estabilidade
+        fireInitQueries: false, // Não disparar queries iniciais
       });
 
       this.setupWebSocketHandlers();
@@ -237,6 +326,12 @@ export class BaileysService extends EventEmitter {
       this.sock.ev.on('error' as any, (error: any) => {
         logger.warn('⚠️ Socket error event:', error.message);
         this.stats.lastError = error.message;
+        
+        // 🆕 Se for erro de link, marcar cooldown longo
+        if (error.message?.includes("can't link") || error.message?.includes('Conflict')) {
+          this.lastConnectionAttempt = new Date(Date.now() + this.COOLDOWN_AFTER_ERROR - this.MIN_TIME_BETWEEN_ATTEMPTS);
+          this.saveCooldownState();
+        }
       });
 
       this.sock.ev.on('connection.update', async (update) => {
@@ -255,35 +350,45 @@ export class BaileysService extends EventEmitter {
         }
       });
 
+      // 🔧 Aumentado timeout de inicialização
       setTimeout(() => {
         if (!this.isConnected && this.isInitializing) {
           this.isInitializing = false;
           logger.info('⏱️  Timeout de inicialização');
         }
-      }, 15000); // Aumentado para 15s
+      }, 30000); // 🔧 Aumentado de 15s para 30s
 
     } catch (error: any) {
       this.isInitializing = false;
       this.reconnecting = false;
       logger.error('❌ Erro ao inicializar Baileys:', error);
       
-      // 🔧 NOVO: Detectar erro "can't link devices"
+      // 🔧 Detectar erro "can't link devices"
       if (error?.message?.includes('can\'t link devices') || 
           error?.message?.includes('Conflict') ||
-          error?.output?.statusCode === 428) {
+          error?.output?.statusCode === 428 ||
+          error?.output?.statusCode === 409) {
         logger.error('🚫 ERRO "CAN\'T LINK DEVICES" DETECTADO!');
-        logger.error('💡 SOLUÇÃO: Aguarde 2-3 minutos antes de tentar novamente');
+        logger.error('💡 SOLUÇÃO: Aguarde 5-10 minutos antes de tentar novamente');
         logger.error('💡 CAUSA: Múltiplas tentativas de conexão muito rápidas');
+        
+        // 🆕 Forçar cooldown longo
+        this.lastConnectionAttempt = new Date(Date.now() + this.COOLDOWN_AFTER_ERROR - this.MIN_TIME_BETWEEN_ATTEMPTS);
+        this.saveCooldownState();
         
         this.qrAttempts++;
         
         if (this.qrAttempts >= this.maxQRAttempts) {
-          logger.error('❌ Muitas tentativas falhas. Aguarde 5 minutos antes de tentar novamente.');
+          logger.error('❌ Muitas tentativas falhas. Aguarde 10 minutos antes de tentar novamente.');
           this.qrAttempts = 0;
-          throw new Error('Muitas tentativas de conexão. Aguarde 5 minutos e tente escanear o QR Code novamente.');
+          
+          // 🆕 Limpar sessão corrompida automaticamente
+          await this.clearCorruptedSession();
+          
+          throw new Error('Muitas tentativas de conexão. Aguarde 10 minutos e tente escanear o QR Code novamente.');
         }
         
-        throw new Error('WhatsApp bloqueou temporariamente novas conexões. Aguarde 2-3 minutos e tente novamente.');
+        throw new Error('WhatsApp bloqueou temporariamente novas conexões. Aguarde 5-10 minutos e tente novamente.');
       }
       
       throw error;
@@ -323,10 +428,13 @@ export class BaileysService extends EventEmitter {
 
     if (qr) {
       this.lastQRTime = new Date();
+      this.saveCooldownState();
+      
       this.qrCode = await QRCode.toDataURL(qr);
       logger.info('📱 QR Code gerado - Aguardando pareamento...');
       logger.info('⚠️  IMPORTANTE: Escaneie o QR Code UMA VEZ e aguarde conectar');
       logger.info('⚠️  NÃO escaneie múltiplas vezes ou terá erro "can\'t link devices"');
+      logger.info('⚠️  Aguarde até 60 segundos após escanear');
       this.emit('qr', this.qrCode);
     }
 
@@ -351,7 +459,7 @@ export class BaileysService extends EventEmitter {
         statusCode === 409) {
       logger.error('🚫 ERRO "CAN\'T LINK DEVICES" ou CONFLICT DETECTADO!');
       logger.error('💡 Causa provável: Múltiplas tentativas de conexão simultâneas');
-      logger.error('💡 Solução: Aguarde 3 minutos (180s) antes de tentar novamente');
+      logger.error('💡 Solução: Aguarde 5-10 minutos antes de tentar novamente');
       logger.error('💡 IMPORTANTE: Escaneie o QR Code apenas UMA VEZ');
       
       this.isInitializing = false;
@@ -359,13 +467,17 @@ export class BaileysService extends EventEmitter {
       this.reconnectAttempts = 0;
       this.reconnecting = false;
       
-      // 🔧 CRÍTICO: Registrar tentativa falhada para forçar cooldown
-      this.lastConnectionAttempt = new Date();
+      // 🔧 CRÍTICO: Registrar cooldown longo
+      this.lastConnectionAttempt = new Date(Date.now() + this.COOLDOWN_AFTER_ERROR - this.MIN_TIME_BETWEEN_ATTEMPTS);
+      this.saveCooldownState();
       
       // Limpar sessão corrompida
       await this.clearCorruptedSession();
       
-      this.emit('error', new Error('can\'t link devices - Aguarde 3 minutos (180s) antes de tentar novamente'));
+      this.emit('error', { 
+        code: 'CANT_LINK_DEVICES',
+        message: "can't link devices - Aguarde 5-10 minutos antes de tentar novamente"
+      });
       return;
     }
     
@@ -397,20 +509,6 @@ export class BaileysService extends EventEmitter {
       return;
     }
 
-    // 🔧 CRÍTICO: Verificar cooldown antes de reconectar
-    if (this.lastConnectionAttempt) {
-      const timeSinceLastAttempt = Date.now() - this.lastConnectionAttempt.getTime();
-      if (timeSinceLastAttempt < this.MIN_TIME_BETWEEN_ATTEMPTS) {
-        const waitTime = this.MIN_TIME_BETWEEN_ATTEMPTS - timeSinceLastAttempt;
-        const waitSeconds = Math.round(waitTime / 1000);
-        logger.error(`🚫 COOLDOWN ATIVO: Não é possível reconectar. Aguarde ${waitSeconds}s`);
-        this.reconnectAttempts = 0;
-        this.reconnecting = false;
-        this.emit('disconnected');
-        return;
-      }
-    }
-    
     if (shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
       await this.scheduleReconnect();
     } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
@@ -422,7 +520,7 @@ export class BaileysService extends EventEmitter {
     }
   }
 
-  // 🔧 NOVO: Limpar sessão corrompida
+  // 🔧 MELHORADO: Limpar sessão corrompida com backup
   private async clearCorruptedSession(): Promise<void> {
     logger.info('🗑️ Limpando sessão corrompida...');
     
@@ -435,9 +533,15 @@ export class BaileysService extends EventEmitter {
         try {
           fs.cpSync(sessionDir, backupDir, { recursive: true });
           logger.info(`📦 Backup da sessão criado em: ${backupDir}`);
+          
+          // 🆕 Limpar backups antigos (manter apenas os últimos 3)
+          this.cleanOldBackups();
         } catch (backupError) {
           logger.warn('⚠️ Não foi possível fazer backup da sessão');
         }
+        
+        // Remover lock primeiro
+        this.removeLockFile();
         
         // Deletar sessão corrompida
         fs.rmSync(sessionDir, { recursive: true, force: true });
@@ -448,6 +552,29 @@ export class BaileysService extends EventEmitter {
     }
   }
 
+  // 🆕 Limpar backups antigos
+  private cleanOldBackups(): void {
+    try {
+      const files = fs.readdirSync(this.sessionPath);
+      const backups = files
+        .filter(f => f.startsWith('session_backup_'))
+        .map(f => ({
+          name: f,
+          time: parseInt(f.replace('session_backup_', ''))
+        }))
+        .sort((a, b) => b.time - a.time);
+      
+      // Remover backups além dos 3 mais recentes
+      for (let i = 3; i < backups.length; i++) {
+        const backupPath = path.join(this.sessionPath, backups[i].name);
+        fs.rmSync(backupPath, { recursive: true, force: true });
+        logger.info(`🗑️ Backup antigo removido: ${backups[i].name}`);
+      }
+    } catch (error) {
+      logger.warn('⚠️ Erro ao limpar backups antigos:', error);
+    }
+  }
+
   private async scheduleReconnect(): Promise<void> {
     if (this.reconnecting) {
       logger.warn('⚠️  Reconexão já em andamento');
@@ -455,15 +582,11 @@ export class BaileysService extends EventEmitter {
     }
     
     // 🔧 CRÍTICO: Verificar cooldown antes de agendar reconexão
-    if (this.lastConnectionAttempt) {
-      const timeSinceLastAttempt = Date.now() - this.lastConnectionAttempt.getTime();
-      if (timeSinceLastAttempt < this.MIN_TIME_BETWEEN_ATTEMPTS) {
-        const waitTime = this.MIN_TIME_BETWEEN_ATTEMPTS - timeSinceLastAttempt;
-        const waitSeconds = Math.round(waitTime / 1000);
-        logger.error(`🚫 COOLDOWN ATIVO: Reconexão bloqueada. Aguarde ${waitSeconds}s`);
-        this.reconnecting = false;
-        return;
-      }
+    const cooldown = this.checkCooldown();
+    if (!cooldown.canProceed) {
+      logger.error(`🚫 COOLDOWN ATIVO: Reconexão bloqueada. Aguarde ${cooldown.waitSeconds}s`);
+      this.reconnecting = false;
+      return;
     }
     
     this.reconnecting = true;
@@ -472,8 +595,8 @@ export class BaileysService extends EventEmitter {
     
     // 🔧 CRÍTICO: Backoff mais agressivo para evitar "can't link devices"
     const delay = Math.min(
-      this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1), // Backoff exponencial de 2x
-      120000 // Máximo 2 minutos
+      this.reconnectDelay * Math.pow(2.5, this.reconnectAttempts - 1), // 🔧 Backoff de 2.5x (era 2x)
+      180000 // 🔧 Máximo 3 minutos (era 2)
     );
     
     logger.info(`🔄 Reconectando (${this.reconnectAttempts}/${this.maxReconnectAttempts}) em ${Math.round(delay/1000)}s...`);
@@ -484,9 +607,10 @@ export class BaileysService extends EventEmitter {
       } catch (error: any) {
         logger.error('❌ Erro na reconexão:', error);
         
-        // 🔧 NOVO: Se for erro "can't link devices", não tentar novamente
+        // 🔧 Se for erro "can't link devices", não tentar novamente
         if (error?.message?.includes('can\'t link devices') || 
-            error?.message?.includes('Aguarde')) {
+            error?.message?.includes('Aguarde') ||
+            error?.message?.includes('Cooldown')) {
           logger.error('🚫 Reconexão automática desabilitada devido a cooldown');
           this.reconnectAttempts = 0;
         }
@@ -505,6 +629,11 @@ export class BaileysService extends EventEmitter {
     this.lastMessageTime = new Date();
     this.connectionLostCount = 0;
     
+    // 🆕 Resetar cooldowns após conexão bem-sucedida
+    // (mas manter um mínimo para evitar loops rápidos)
+    this.lastConnectionAttempt = new Date(Date.now() - this.MIN_TIME_BETWEEN_ATTEMPTS + 60000); // Permite nova tentativa em 1 min
+    this.saveCooldownState();
+    
     if (isNewLogin) {
       logger.info('✅ Baileys conectado! (NOVO LOGIN)');
       logger.info('📱 Dispositivo pareado com sucesso');
@@ -515,8 +644,8 @@ export class BaileysService extends EventEmitter {
     
     this.emit('connected');
     
-    // 🔧 Aguardar 3 segundos antes de iniciar health check e processar fila
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // 🔧 Aguardar 5 segundos antes de iniciar health check
+    await new Promise(resolve => setTimeout(resolve, 5000));
     
     this.startHealthCheck();
     this.startKeepAlive();
@@ -603,7 +732,7 @@ export class BaileysService extends EventEmitter {
       if (!this.isInitializing && !this.reconnecting) {
         try {
           await this.initialize();
-          const maxWait = 10000;
+          const maxWait = 15000;
           const startWait = Date.now();
           while (!this.isConnected && (Date.now() - startWait) < maxWait) {
             await new Promise(resolve => setTimeout(resolve, 500));
@@ -617,103 +746,26 @@ export class BaileysService extends EventEmitter {
 
     if (!this.isConnected || !this.isWebSocketOpen()) {
       logger.warn('⚠️ Não conectado ou WebSocket não está aberto');
-      
-      if (!this.isInitializing && !this.reconnecting) {
-        logger.info('🔄 Tentando reconectar...');
-        this.isConnected = false;
-        
-        try {
-          await this.initialize();
-          const maxWait = 10000;
-          const startWait = Date.now();
-          while (!this.isConnected && (Date.now() - startWait) < maxWait) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
-        } catch (error) {
-          logger.error('❌ Falha ao reconectar:', error);
-          return false;
-        }
-      }
+      return false;
     }
 
-    return this.isConnected && this.isWebSocketOpen();
+    return true;
   }
 
-  async sendTextMessage(phoneNumber: string, text: string, retryCount: number = 0): Promise<void> {
-    const isConnected = await this.ensureConnection();
-    
-    if (!isConnected) {
-      logger.warn('⚠️ Não conectado, adicionando à fila...');
-      
-      return new Promise((resolve, reject) => {
-        this.messageQueue.push({
-          phoneNumber,
-          text,
-          resolve,
-          reject,
-          timestamp: new Date(),
-        });
-        
-        logger.info(`📥 Mensagem na fila (${this.messageQueue.length} pendentes)`);
-        
-        setTimeout(() => {
-          const index = this.messageQueue.findIndex(
-            m => m.phoneNumber === phoneNumber && m.text === text
-          );
-          if (index >= 0) {
-            const msg = this.messageQueue.splice(index, 1)[0];
-            msg.reject(new Error('Timeout: Não conectado em 60s'));
-          }
-        }, 60000);
+  async sendTextMessage(phoneNumber: string, text: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.messageQueue.push({
+        phoneNumber,
+        text,
+        resolve,
+        reject,
+        timestamp: new Date(),
       });
-    }
 
-    if (!this.sock || !this.sock.ws) {
-      throw new Error('Socket ou WebSocket indisponível');
-    }
-
-    const wsReadyState = (this.sock.ws as any).readyState;
-    if (wsReadyState !== 1) {
-      throw new Error(`WebSocket não está aberto (readyState: ${wsReadyState})`);
-    }
-
-    try {
-      const jid = this.formatPhoneNumber(phoneNumber);
-      
-      logger.info(`📤 Enviando para ${phoneNumber}`);
-      
-      await this.sock.sendMessage(jid, { text });
-      
-      logger.info(`✅ Mensagem enviada`);
-      this.lastMessageTime = new Date();
-      this.stats.messagesSent++;
-    } catch (error: any) {
-      this.stats.messagesFailed++;
-      this.stats.lastError = error?.message;
-      
-      logger.error(`❌ Erro ao enviar:`, {
-        message: error?.message,
-        code: error?.code
-      });
-      
-      const isConnectionError = 
-        error?.message?.includes('Connection Closed') ||
-        error?.message?.includes('Connection Terminated') ||
-        error?.message?.includes('Stream Errored') ||
-        error?.code === 'ECONNRESET' ||
-        error?.code === 'EPIPE';
-      
-      if (isConnectionError && retryCount < 2) {
-        logger.warn(`🔄 Retry ${retryCount + 1}/2...`);
-        this.isConnected = false;
-        
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        return this.sendTextMessage(phoneNumber, text, retryCount + 1);
+      if (!this.isProcessingQueue) {
+        this.processMessageQueue();
       }
-      
-      throw error;
-    }
+    });
   }
 
   private async processMessageQueue(): Promise<void> {
@@ -721,44 +773,60 @@ export class BaileysService extends EventEmitter {
       return;
     }
 
-    if (!this.isConnected || !this.isWebSocketOpen()) {
-      logger.warn('⚠️ Não conectado, não processando fila');
-      return;
-    }
-
     this.isProcessingQueue = true;
-    logger.info(`📤 Processando fila (${this.messageQueue.length} pendentes)...`);
 
-    while (this.messageQueue.length > 0 && this.isConnected && this.isWebSocketOpen()) {
-      const message = this.messageQueue.shift();
-      if (!message) break;
-
-      try {
-        await this.sendTextMessage(message.phoneNumber, message.text);
-        message.resolve();
-        logger.info(`✅ Mensagem da fila enviada`);
-      } catch (error) {
-        message.reject(error);
-        logger.error(`❌ Falha ao enviar da fila:`, error);
+    while (this.messageQueue.length > 0) {
+      const item = this.messageQueue[0];
+      
+      // Verificar se mensagem expirou (mais de 5 minutos na fila)
+      if (Date.now() - item.timestamp.getTime() > 300000) {
+        this.messageQueue.shift();
+        item.reject(new Error('Mensagem expirou na fila'));
+        continue;
       }
 
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const isConnected = await this.ensureConnection();
+      
+      if (!isConnected || !this.sock) {
+        logger.warn('⚠️ Não conectado, aguardando para reprocessar fila...');
+        break;
+      }
+
+      try {
+        const jid = this.formatPhoneNumber(item.phoneNumber);
+        await this.sock.sendMessage(jid, { text: item.text });
+        
+        this.messageQueue.shift();
+        item.resolve();
+        
+        this.lastMessageTime = new Date();
+        this.stats.messagesSent++;
+        
+        logger.info(`✅ Mensagem enviada para ${item.phoneNumber}`);
+        
+        // Aguardar 1 segundo entre mensagens
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } catch (error: any) {
+        logger.error(`❌ Erro ao enviar mensagem:`, error);
+        
+        this.messageQueue.shift();
+        item.reject(error);
+        this.stats.messagesFailed++;
+      }
     }
 
     this.isProcessingQueue = false;
-    logger.info(`✅ Fila processada`);
   }
 
   private clearMessageQueue(reason: string): void {
-    if (this.messageQueue.length === 0) return;
-
-    logger.warn(`⚠️ Limpando fila: ${reason}`);
-    
-    for (const message of this.messageQueue) {
-      message.reject(new Error(`Fila limpa: ${reason}`));
+    const count = this.messageQueue.length;
+    if (count > 0) {
+      logger.warn(`⚠️ Limpando fila de mensagens (${count} itens): ${reason}`);
+      while (this.messageQueue.length > 0) {
+        const item = this.messageQueue.shift();
+        item?.reject(new Error(`Fila limpa: ${reason}`));
+      }
     }
-    
-    this.messageQueue = [];
   }
 
   async sendMediaMessage(
@@ -837,13 +905,28 @@ export class BaileysService extends EventEmitter {
     return this.isConnected && this.isWebSocketOpen();
   }
 
+  // 🆕 Método para verificar se pode gerar novo QR
+  canGenerateQR(): { canGenerate: boolean; waitSeconds: number; reason: string } {
+    const cooldown = this.checkCooldown();
+    return {
+      canGenerate: cooldown.canProceed,
+      waitSeconds: cooldown.waitSeconds,
+      reason: cooldown.reason
+    };
+  }
+
   getStats() {
+    const cooldown = this.checkCooldown();
     return {
       ...this.stats,
       isConnected: this.isConnected,
       queueSize: this.messageQueue.length,
       uptime: Date.now() - this.lastMessageTime.getTime(),
       qrAttempts: this.qrAttempts,
+      // 🆕 Informações de cooldown
+      cooldownActive: !cooldown.canProceed,
+      cooldownSeconds: cooldown.waitSeconds,
+      cooldownReason: cooldown.reason,
     };
   }
 
@@ -867,7 +950,7 @@ export class BaileysService extends EventEmitter {
           logger.warn('⚠️ Erro no keep-alive:', error?.message);
         }
       }
-    }, 120000);
+    }, 60000); // 🔧 1 minuto (era variável)
   }
 
   private stopKeepAlive(): void {
@@ -885,64 +968,30 @@ export class BaileysService extends EventEmitter {
     logger.info('🏥 Iniciando health check');
 
     this.healthCheckInterval = setInterval(async () => {
-      const now = new Date();
-      const timeSinceLastMessage = now.getTime() - this.lastMessageTime.getTime();
-      const minutesSinceLastMessage = Math.floor(timeSinceLastMessage / 60000);
+      if (!this.isConnected) {
+        return;
+      }
 
-      if (this.isConnected && timeSinceLastMessage > 300000) {
+      if (!this.isWebSocketOpen()) {
+        logger.warn('⚠️ Health check: WebSocket não está aberto');
+        this.connectionLostCount++;
         
-        if (this.isWebSocketOpen()) {
-          try {
-            await this.sock!.sendPresenceUpdate('available');
-            this.lastMessageTime = new Date();
-            this.connectionLostCount = 0;
-          } catch (error: any) {
-            this.connectionLostCount++;
-            
-            if (this.connectionLostCount >= 3) {
-              logger.error('❌ Conexão perdida!');
-              this.isConnected = false;
-              this.connectionLostCount = 0;
-              
-              // 🔧 CRÍTICO: Verificar cooldown antes de reconectar
-              if (this.lastConnectionAttempt) {
-                const timeSinceLastAttempt = Date.now() - this.lastConnectionAttempt.getTime();
-                if (timeSinceLastAttempt < this.MIN_TIME_BETWEEN_ATTEMPTS) {
-                  logger.error('🚫 COOLDOWN ATIVO: Health check não pode reconectar');
-                  return;
-                }
-              }
-              
-              this.initialize().catch(err => {
-                logger.error('Erro ao reconectar:', err);
-              });
-            }
-          }
-        } else {
+        if (this.connectionLostCount >= 3) {
+          logger.error('❌ Conexão perdida detectada pelo health check');
           this.isConnected = false;
           
-          if (this.reconnecting || this.isInitializing) {
-            this.reconnecting = false;
-            this.isInitializing = false;
+          // 🔧 Verificar cooldown antes de tentar reconectar
+          const cooldown = this.checkCooldown();
+          if (cooldown.canProceed) {
+            await this.scheduleReconnect();
+          } else {
+            logger.warn(`⚠️ Reconexão adiada: cooldown de ${cooldown.waitSeconds}s`);
           }
-          
-          // 🔧 CRÍTICO: Verificar cooldown antes de reconectar
-          if (this.lastConnectionAttempt) {
-            const timeSinceLastAttempt = Date.now() - this.lastConnectionAttempt.getTime();
-            if (timeSinceLastAttempt < this.MIN_TIME_BETWEEN_ATTEMPTS) {
-              logger.error('🚫 COOLDOWN ATIVO: Health check não pode reconectar');
-              return;
-            }
-          }
-          
-          this.reconnecting = true;
-          this.initialize().catch(err => {
-            logger.error('❌ Erro ao reconectar:', err);
-            this.reconnecting = false;
-          });
         }
+      } else {
+        this.connectionLostCount = 0;
       }
-    }, 30000);
+    }, 45000); // 🔧 45 segundos (era 30)
   }
 
   private stopHealthCheck(): void {
@@ -956,20 +1005,33 @@ export class BaileysService extends EventEmitter {
     if (!this.sock) return;
 
     try {
+      // 🔧 MELHORADO: Ordem correta de cleanup
+      logger.info('🧹 Iniciando cleanup do socket...');
+      
+      // 1. Remover todos os listeners primeiro
       this.sock.ev.removeAllListeners(undefined);
       
+      // 2. Fechar WebSocket
       if (this.sock.ws) {
         try {
-          this.sock.ws.close();
+          (this.sock.ws as any).close();
+          logger.info('✅ WebSocket fechado');
           await new Promise(resolve => setTimeout(resolve, 2000));
         } catch (error) {
           logger.warn('⚠️ Erro ao fechar WebSocket:', error);
         }
       }
       
-      this.sock.end(undefined);
+      // 3. Encerrar socket
+      try {
+        this.sock.end(undefined);
+        logger.info('✅ Socket encerrado');
+      } catch (error) {
+        logger.warn('⚠️ Erro ao encerrar socket:', error);
+      }
+      
       this.sock = null;
-      logger.info('Socket limpo');
+      logger.info('✅ Socket limpo completamente');
     } catch (error) {
       logger.error('Erro ao limpar socket:', error);
       this.sock = null;
@@ -977,6 +1039,8 @@ export class BaileysService extends EventEmitter {
   }
 
   async disconnect(): Promise<void> {
+    logger.info('🔌 Iniciando desconexão...');
+    
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
@@ -992,46 +1056,40 @@ export class BaileysService extends EventEmitter {
 
     if (this.sock) {
       try {
-        await this.cleanupSocket();
+        // 🔧 CRÍTICO: Fazer logout ANTES de cleanup
+        logger.info('🔓 Fazendo logout...');
         await this.sock.logout();
+        logger.info('✅ Logout realizado');
       } catch (error) {
-        logger.error('Erro ao fazer logout:', error);
+        logger.warn('⚠️ Erro ao fazer logout:', error);
       }
-      this.isConnected = false;
-      this.qrCode = null;
-      this.isInitializing = false;
-      logger.info('Baileys desconectado');
+      
+      // Agora fazer cleanup
+      await this.cleanupSocket();
     }
+    
+    this.isConnected = false;
+    this.qrCode = null;
+    this.isInitializing = false;
     
     // Remover lock de sessão
     this.removeLockFile();
+    
+    logger.info('✅ Baileys desconectado completamente');
   }
 
   async forceNewQR(): Promise<string> {
-    logger.info('🔄 [forceNewQR] Gerando novo QR Code...');
+    logger.info('🔄 [forceNewQR] Solicitação de novo QR Code...');
     
-    // 🔧 CRÍTICO: Verificar cooldown desde última tentativa de conexão
-    if (this.lastConnectionAttempt) {
-      const timeSinceLastAttempt = Date.now() - this.lastConnectionAttempt.getTime();
-      if (timeSinceLastAttempt < this.MIN_TIME_BETWEEN_ATTEMPTS) {
-        const waitTime = this.MIN_TIME_BETWEEN_ATTEMPTS - timeSinceLastAttempt;
-        const waitSeconds = Math.round(waitTime / 1000);
-        logger.error(`🚫 COOLDOWN ATIVO: Aguarde ${waitSeconds}s antes de gerar novo QR`);
-        throw new Error(`Aguarde ${waitSeconds} segundos antes de gerar novo QR Code (prevenção "can't link devices")`);
-      }
+    // 🔧 CRÍTICO: Verificar cooldown
+    const cooldown = this.checkCooldown();
+    if (!cooldown.canProceed) {
+      const message = `Aguarde ${cooldown.waitSeconds} segundos antes de gerar novo QR Code (prevenção "can't link devices")`;
+      logger.error(`🚫 COOLDOWN ATIVO: ${message}`);
+      throw new Error(message);
     }
     
-    // 🔧 CRÍTICO: Verificar tempo desde último QR
-    if (this.lastQRTime) {
-      const timeSinceLastQR = Date.now() - this.lastQRTime.getTime();
-      if (timeSinceLastQR < this.MIN_TIME_BETWEEN_QR) {
-        const waitTime = this.MIN_TIME_BETWEEN_QR - timeSinceLastQR;
-        const waitSeconds = Math.round(waitTime / 1000);
-        logger.error(`🚫 QR muito recente: Aguarde ${waitSeconds}s`);
-        throw new Error(`Aguarde ${waitSeconds} segundos antes de gerar novo QR Code`);
-      }
-    }
-    
+    // 🔧 Resetar flags
     if (this.isInitializing) {
       this.isInitializing = false;
       this.reconnecting = false;
@@ -1056,6 +1114,7 @@ export class BaileysService extends EventEmitter {
     this.isConnected = false;
     this.connectionLostCount = 0;
     
+    // 🔧 Cleanup do socket se existir
     if (this.sock) {
       await this.cleanupSocket();
     }
@@ -1067,13 +1126,22 @@ export class BaileysService extends EventEmitter {
         // Remover lock primeiro
         this.removeLockFile();
         
+        // Fazer backup antes de remover
+        const backupDir = path.join(this.sessionPath, `session_backup_${Date.now()}`);
+        try {
+          fs.cpSync(sessionDir, backupDir, { recursive: true });
+          logger.info(`📦 Backup da sessão criado`);
+        } catch (e) {
+          logger.warn('⚠️ Não foi possível fazer backup');
+        }
+        
         fs.rmSync(sessionDir, { recursive: true, force: true });
         logger.info('✅ Sessão removida');
       }
       
-      // 🔧 CRÍTICO: Aguardar 5 segundos após remover sessão
-      logger.info('⏳ Aguardando 5s para estabilizar...');
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      // 🔧 CRÍTICO: Aguardar 10 segundos após remover sessão
+      logger.info('⏳ Aguardando 10s para estabilizar...');
+      await new Promise(resolve => setTimeout(resolve, 10000));
       
     } catch (error: any) {
       logger.error('❌ Erro ao remover sessão:', error?.message);
@@ -1089,7 +1157,7 @@ export class BaileysService extends EventEmitter {
       await Promise.race([
         this.initialize(),
         new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout')), 30000)
+          setTimeout(() => reject(new Error('Timeout ao gerar QR Code (60s)')), 60000)
         )
       ]);
     } catch (error: any) {
@@ -1097,8 +1165,8 @@ export class BaileysService extends EventEmitter {
       this.isInitializing = false;
       this.reconnecting = false;
       
-      if (error?.message?.includes('can\'t link devices')) {
-        throw new Error('WhatsApp bloqueou temporariamente. Aguarde 2-3 minutos e tente novamente.');
+      if (error?.message?.includes('can\'t link devices') || error?.message?.includes('Aguarde')) {
+        throw new Error('WhatsApp bloqueou temporariamente. Aguarde 5-10 minutos e tente novamente.');
       }
       
       throw error;
@@ -1112,7 +1180,7 @@ export class BaileysService extends EventEmitter {
         resolved = true;
         this.qrTimeout = null;
         this.isInitializing = false;
-        reject(new Error('Timeout ao gerar QR Code'));
+        reject(new Error('Timeout ao gerar QR Code (60s). Tente novamente.'));
       }, 60000);
 
       const qrListener = (qr: string) => {
@@ -1140,7 +1208,7 @@ export class BaileysService extends EventEmitter {
         reject(new Error('Desconectado antes de gerar QR'));
       };
       
-      const errorListener = (error: Error) => {
+      const errorListener = (error: any) => {
         if (resolved) return;
         resolved = true;
         
@@ -1159,7 +1227,7 @@ export class BaileysService extends EventEmitter {
     });
   }
 
-  // 🔧 NOVO: Remover arquivo de lock
+  // 🔧 Remover arquivo de lock
   private removeLockFile(): void {
     try {
       const sessionDir = path.join(this.sessionPath, 'session');
