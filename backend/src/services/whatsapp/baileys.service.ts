@@ -444,7 +444,6 @@ export class BaileysService extends EventEmitter {
       await this.handleConnectionOpen(isNewLogin);
     } else if (connection === 'connecting') {
       logger.info('🔄 Conectando ao WhatsApp...');
-      logger.info('⏳ Aguardando resposta do servidor WhatsApp...');
     }
   }
 
@@ -452,54 +451,36 @@ export class BaileysService extends EventEmitter {
     const err = lastDisconnect?.error as any;
     const statusCode = err?.output?.statusCode;
     const errorMessage = err?.message || err?.output?.payload?.message || '';
-    
-    // Log detalhado para debug
-    logger.info('🔍 Analisando desconexão:', {
-      statusCode,
-      errorMessage,
-      errorOutput: err?.output,
-      hasError: !!err
-    });
 
-    // ==========================================================================
-    // CORREÇÃO: Detectar "can't link devices" de forma mais precisa
-    // ==========================================================================
-    // O erro "can't link devices" vem com:
-    // - statusCode 428 (Precondition Required) 
-    // - OU mensagem contendo literalmente "can't link"
-    // - OU statusCode 409 com mensagem de Conflict relacionada a dispositivos
-    // 
-    // NÃO é "can't link devices" se:
-    // - statusCode for undefined (timeout/expiração normal)
-    // - statusCode for 408 (Request Timeout)
-    // - statusCode for 503 (Service Unavailable)
-    // - Mensagem for "Connection Closed" ou "Stream Errored" (desconexão normal)
-    // ==========================================================================
-    
+    // LOG DETALHADO PARA DEBUG
+    logger.info('═══════════════════════════════════════════════════════════════');
+    logger.info('🔍 DESCONEXÃO DETECTADA - ANÁLISE COMPLETA');
+    logger.info('═══════════════════════════════════════════════════════════════');
+    logger.info('📊 lastDisconnect:', JSON.stringify(lastDisconnect, null, 2));
+    logger.info('📊 statusCode:', statusCode);
+    logger.info('📊 errorMessage:', errorMessage);
+    logger.info('📊 err?.output:', JSON.stringify(err?.output, null, 2));
+    logger.info('═══════════════════════════════════════════════════════════════');
+
     const isCantLinkDevices = (
-      // Status code 428 É SEMPRE "can't link devices"
       statusCode === 428 ||
-      // Mensagem contém literalmente "can't link" (case insensitive)
       errorMessage.toLowerCase().includes("can't link") ||
       errorMessage.toLowerCase().includes("cant link") ||
-      // Status 409 COM mensagem específica de Conflict de dispositivo
       (statusCode === 409 && (
         errorMessage.toLowerCase().includes('device') ||
         errorMessage.toLowerCase().includes('conflict')
       ))
     );
-    
-    // Verificar se é um timeout/expiração normal (NÃO é "can't link devices")
+
     const isNormalTimeout = (
-      !statusCode || // statusCode undefined = timeout normal
-      statusCode === 408 || // Request Timeout
-      statusCode === 503 || // Service Unavailable
+      !statusCode ||
+      statusCode === 408 ||
+      statusCode === 503 ||
       errorMessage.toLowerCase().includes('timed out') ||
       errorMessage.toLowerCase().includes('timeout') ||
-      errorMessage.toLowerCase().includes('qr') // Expiração de QR
+      errorMessage.toLowerCase().includes('qr')
     );
-    
-    // Verificar se é desconexão normal de stream
+
     const isStreamError = (
       errorMessage.includes('Stream Errored') ||
       errorMessage.includes('Connection Closed') ||
@@ -507,111 +488,71 @@ export class BaileysService extends EventEmitter {
       errorMessage.includes('ECONNRESET')
     );
 
-    // ==========================================================================
-    // DECISÃO: Qual tipo de erro é?
-    // ==========================================================================
-    
     if (isCantLinkDevices && !isNormalTimeout) {
-      // ========================================================================
-      // CASO 1: REALMENTE é "can't link devices"
-      // ========================================================================
       logger.error('🚫 ERRO "CAN\'T LINK DEVICES" CONFIRMADO!');
       logger.error('💡 Causa: WhatsApp bloqueou por múltiplas tentativas');
       logger.error('💡 Solução: Aguarde 5-10 minutos antes de tentar novamente');
-      logger.error('💡 Detalhes:', { statusCode, errorMessage });
-      
+
       this.isInitializing = false;
       this.isConnected = false;
       this.reconnectAttempts = 0;
       this.reconnecting = false;
-      
-      // Registrar cooldown longo
+
       this.lastConnectionAttempt = new Date(Date.now() + this.COOLDOWN_AFTER_ERROR - this.MIN_TIME_BETWEEN_ATTEMPTS);
       this.saveCooldownState();
-      
-      // Limpar sessão corrompida
       await this.clearCorruptedSession();
-      
+
       this.emit('error', { 
         code: 'CANT_LINK_DEVICES',
         message: "can't link devices - Aguarde 5-10 minutos antes de tentar novamente"
       });
       return;
-      
+
     } else if (isNormalTimeout || !statusCode) {
-      // ========================================================================
-      // CASO 2: Timeout/Expiração normal (QR expirou, conexão caiu, etc)
-      // ========================================================================
       logger.info('⏱️ Timeout ou expiração normal detectado');
-      logger.info('💡 Isso é normal - o QR expirou ou a conexão caiu');
-      
+
       this.isInitializing = false;
       this.isConnected = false;
       this.qrCode = null;
-      
-      // NÃO emitir erro de "can't link devices"
-      // NÃO limpar sessão (pode ser apenas QR expirado)
-      // NÃO forçar cooldown longo
-      
-      // Permitir tentar novamente após um curto período
+
       this.emit('qr_expired');
       this.emit('disconnected');
       return;
-      
+
     } else if (isStreamError) {
-      // ========================================================================
-      // CASO 3: Erro de stream (conexão perdida, reconectar automaticamente)
-      // ========================================================================
       logger.info('🔌 Conexão perdida (stream error)');
-      
+
       this.isInitializing = false;
       this.isConnected = false;
       this.clearMessageQueue('Conexão perdida');
-      
-      // Tentar reconectar se ainda não atingiu o limite
+
       if (this.reconnectAttempts < this.maxReconnectAttempts) {
         await this.scheduleReconnect();
       } else {
-        logger.warn('⚠️ Limite de reconexões atingido');
         this.reconnectAttempts = 0;
         this.emit('disconnected');
       }
       return;
     }
-    
-    // ==========================================================================
-    // CASO 4: Outros erros (tratar normalmente)
-    // ==========================================================================
-    
+
     const shouldReconnect = statusCode !== this.baileys!.DisconnectReason.loggedOut;
-    
-    logger.warn('⚠️ Conexão fechada (outro motivo):', {
-      statusCode,
-      errorMessage,
-      shouldReconnect,
-      reconnectAttempts: this.reconnectAttempts
-    });
+
+    logger.warn('⚠️ Conexão fechada (outro motivo):', { statusCode, errorMessage });
 
     this.isInitializing = false;
     this.isConnected = false;
     this.clearMessageQueue('Conexão fechada');
 
-    // Se usuário fez logout, não reconectar
     if (statusCode === this.baileys!.DisconnectReason.loggedOut) {
-      logger.warn('⚠️ Usuário fez logout do WhatsApp');
       this.reconnectAttempts = 0;
       this.emit('disconnected');
       return;
     }
 
-    // Tentar reconectar se permitido
     if (shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
       await this.scheduleReconnect();
-    } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      logger.warn('⚠️ Limite de reconexões atingido');
-      this.reconnectAttempts = 0;
-      this.emit('disconnected');
     } else {
+      this.reconnectAttempts = 0;
       this.emit('disconnected');
     }
   }
@@ -619,8 +560,9 @@ export class BaileysService extends EventEmitter {
   // 🔧 MELHORADO: Limpar sessão corrompida com backup
   private async clearCorruptedSession(): Promise<void> {
     logger.info('🗑️ Limpando sessão corrompida...');
-    
+
     const sessionDir = path.join(this.sessionPath, 'session');
+
     
     try {
       if (fs.existsSync(sessionDir)) {
