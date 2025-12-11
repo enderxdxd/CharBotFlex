@@ -70,11 +70,16 @@ interface DashboardStats {
 interface RecentActivity {
   id: string;
   type: 'new' | 'closed' | 'transfer' | 'waiting';
+  status: 'bot' | 'human' | 'waiting' | 'closed';
   contactName: string;
   phoneNumber: string;
   message: string;
   timestamp: Date;
+  updatedAt: Date;
   operator?: string;
+  lastMessage?: {
+    content: string;
+  };
 }
 
 export default function DashboardPage() {
@@ -233,37 +238,49 @@ export default function DashboardPage() {
     {
       id: '1',
       type: 'new',
+      status: 'bot',
       contactName: 'Cliente Novo',
       phoneNumber: '5511999999999',
       message: 'Olá, gostaria de informações sobre planos',
       timestamp: new Date(Date.now() - 2 * 60000),
-      operator: 'Bot'
+      updatedAt: new Date(Date.now() - 2 * 60000),
+      operator: 'Bot',
+      lastMessage: { content: 'Olá, gostaria de informações sobre planos' }
     },
     {
       id: '2',
       type: 'closed',
+      status: 'closed',
       contactName: 'Ana Paula',
       phoneNumber: '5511988888888',
       message: 'Problema resolvido, obrigada!',
       timestamp: new Date(Date.now() - 5 * 60000),
-      operator: 'Maria Silva'
+      updatedAt: new Date(Date.now() - 5 * 60000),
+      operator: 'Maria Silva',
+      lastMessage: { content: 'Problema resolvido, obrigada!' }
     },
     {
       id: '3',
       type: 'transfer',
+      status: 'human',
       contactName: 'Carlos Eduardo',
       phoneNumber: '5511977777777',
       message: 'Transferido para Vendas',
       timestamp: new Date(Date.now() - 8 * 60000),
-      operator: 'João Santos'
+      updatedAt: new Date(Date.now() - 8 * 60000),
+      operator: 'João Santos',
+      lastMessage: { content: 'Transferido para Vendas' }
     },
     {
       id: '4',
       type: 'waiting',
+      status: 'waiting',
       contactName: 'Juliana Costa',
       phoneNumber: '5511966666666',
       message: 'Aguardando atendimento',
-      timestamp: new Date(Date.now() - 12 * 60000)
+      timestamp: new Date(Date.now() - 12 * 60000),
+      updatedAt: new Date(Date.now() - 12 * 60000),
+      lastMessage: { content: 'Aguardando atendimento' }
     }
   ];
 
