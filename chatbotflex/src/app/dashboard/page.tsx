@@ -293,7 +293,7 @@ export default function DashboardPage() {
     return `${Math.round(ms / 60000)}min`;
   };
 
-  if (loading) {
+  if (loading || !stats) {
     return (
       <ProtectedRoute>
         <MainLayout>
