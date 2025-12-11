@@ -158,6 +158,7 @@ export class MessageHandler {
       phoneNumber,
       contactName, // Usar nome do WhatsApp
       status: 'bot',
+      channel: 'whatsapp' as const, // Canal: WhatsApp
       context: {
         stage: 'initial',
         userData: {},

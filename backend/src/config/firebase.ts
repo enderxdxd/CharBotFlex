@@ -69,4 +69,5 @@ export const collections = {
   quickReplies: 'quick_replies',
   scheduledMessages: 'scheduled_messages',
   feedback: 'feedback',
+  instagramConfig: 'instagram_config',
 };

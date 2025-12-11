@@ -11,7 +11,7 @@ const conversationService = new ConversationService();
  */
 export const getAllConversations = async (req: Request, res: Response) => {
   try {
-    const { status, assignedTo, departmentId } = req.query;
+    const { status, assignedTo, departmentId, channel } = req.query;
     const userId = (req as any).user?.uid;
     const userRole = (req as any).user?.role;
 
@@ -20,6 +20,7 @@ export const getAllConversations = async (req: Request, res: Response) => {
       status: status as string,
       assignedTo: assignedTo as string,
       departmentId: departmentId as string,
+      channel: channel as string, // Filtro por canal: 'whatsapp' | 'instagram'
     };
 
     if (userRole !== 'admin' && userId) {

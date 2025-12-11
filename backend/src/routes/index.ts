@@ -19,6 +19,7 @@ import * as exportController from '../controllers/export.controller.js';
 import * as schedulerController from '../controllers/scheduler.controller.js';
 import * as conversationController from '../controllers/conversation.controller.js';
 import * as testController from '../controllers/test.controller.js';
+import instagramController from '../controllers/instagram.controller.js';
 
 // API Routes para integração externa
 import apiRoutes from './api.routes.js';
@@ -40,6 +41,12 @@ router.get('/health', (req: Request, res: Response) => {
 // API EXTERNA (Integração com apps terceiros)
 // ==========================================
 router.use('/v1', apiRoutes);
+
+// ==========================================
+// WEBHOOK DO INSTAGRAM (Público - sem autenticação)
+// ==========================================
+router.get('/instagram/webhook', instagramController.verifyWebhook.bind(instagramController));
+router.post('/instagram/webhook', instagramController.handleWebhook.bind(instagramController));
 
 // ==========================================
 // ROTAS DE AUTENTICAÇÃO
@@ -178,6 +185,18 @@ router.post('/conversations/:id/reopen', conversationController.reopenConversati
 router.post('/conversations/:id/assign', conversationController.assignConversation as any);
 router.post('/conversations/:id/transfer', conversationController.transferConversation as any);
 router.post('/conversations/:id/mark-read', conversationController.markMessagesAsRead as any);
+
+// ==========================================
+// ROTAS DO INSTAGRAM
+// ==========================================
+router.get('/instagram/config', instagramController.getConfig.bind(instagramController));
+router.post('/instagram/config', instagramController.saveConfig.bind(instagramController));
+router.post('/instagram/connect', instagramController.connectPage.bind(instagramController));
+router.post('/instagram/disconnect', instagramController.disconnect.bind(instagramController));
+router.post('/instagram/toggle', instagramController.toggleActive.bind(instagramController));
+router.get('/instagram/validate', instagramController.validateCredentials.bind(instagramController));
+router.get('/instagram/stats', instagramController.getStats.bind(instagramController));
+router.post('/instagram/send', instagramController.sendMessage.bind(instagramController));
 
 // ==========================================
 // ROTAS DE TESTE (REMOVER EM PRODUÇÃO)

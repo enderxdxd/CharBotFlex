@@ -13,6 +13,7 @@ export class ConversationService {
     status?: string;
     assignedTo?: string;
     departmentId?: string;
+    channel?: string; // Filtro por canal: 'whatsapp' | 'instagram'
   }): Promise<IConversation[]> {
     try {
       let query: any = db.collection(CONVERSATIONS_COLLECTION);
@@ -26,6 +27,9 @@ export class ConversationService {
       }
       if (filters?.departmentId) {
         query = query.where('departmentId', '==', filters.departmentId);
+      }
+      if (filters?.channel) {
+        query = query.where('channel', '==', filters.channel);
       }
 
       // ✅ CORREÇÃO: Remover orderBy para evitar erro de índice
@@ -184,18 +188,31 @@ export class ConversationService {
 
       logger.info(`✅ Mensagem enviada na conversa ${conversationId}`);
       
-      // IMPORTANTE: Enviar mensagem para o WhatsApp
+      // IMPORTANTE: Enviar mensagem para o canal correto (WhatsApp ou Instagram)
       try {
-        const { getWhatsAppManager } = await import('./whatsapp/whatsapp.manager.js');
-        const whatsappManager = getWhatsAppManager();
+        const channel = (conversation as any).channel || 'whatsapp';
         
-        if (conversation.phoneNumber) {
-          await whatsappManager.sendMessage(conversation.phoneNumber, data.content);
-          logger.info(`📱 Mensagem enviada para WhatsApp: ${conversation.phoneNumber}`);
+        if (channel === 'instagram') {
+          // Enviar para Instagram
+          const { default: instagramHandler } = await import('./instagram/instagram.handler.js');
+          const contactId = (conversation as any).contactId;
+          if (contactId) {
+            await instagramHandler.sendOperatorMessage(conversationId, data.content, userId);
+            logger.info(`📸 Mensagem enviada para Instagram: ${contactId}`);
+          }
+        } else {
+          // Enviar para WhatsApp
+          const { getWhatsAppManager } = await import('./whatsapp/whatsapp.manager.js');
+          const whatsappManager = getWhatsAppManager();
+          
+          if (conversation.phoneNumber) {
+            await whatsappManager.sendMessage(conversation.phoneNumber, data.content);
+            logger.info(`📱 Mensagem enviada para WhatsApp: ${conversation.phoneNumber}`);
+          }
         }
-      } catch (whatsappError) {
-        logger.error('❌ Erro ao enviar mensagem para WhatsApp:', whatsappError);
-        // Não falhar a requisição se o WhatsApp falhar
+      } catch (sendError) {
+        logger.error('❌ Erro ao enviar mensagem:', sendError);
+        // Não falhar a requisição se o envio falhar
       }
       
       return newMessage;
